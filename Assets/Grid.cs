@@ -86,11 +86,14 @@ public class Grid : MonoBehaviour {
 		
 		this.PARTICLE_SIZE = GRID_SIZE / Mathf.Max(GRID_RESOLUTION.x, GRID_RESOLUTION.y, GRID_RESOLUTION.z);
 		InitializeGrid();
+
+		sources.Add(new Source(new int[3] {3, 3, 3}, 10f));
 	}
 
 	void Update() {
 		this.dt = Time.deltaTime;
-		diffuse();
+		Emit();
+		Diffuse();
 		UpdateParticleSystem();
 	}
 
@@ -167,7 +170,17 @@ public class Grid : MonoBehaviour {
 		cells[i, j, k].particle = p;
 	}
 
-	public void diffuse() {
+	public void Emit() {
+		foreach (Source s in sources) {
+			int i = s.index[0];
+			int j = s.index[1];
+			int k = s.index[2];
+			cells[i, j, k].ChangeDensity(s.amount * dt);
+			UpdateParticle(i, j, k);
+		}
+	}
+
+	public void Diffuse() {
 		float a = dt * DIFFUSION_RATE * RESOLUTION[0] * RESOLUTION[1] * RESOLUTION[2];
 
 		float[,,] x0 = new float[RESOLUTION[0], RESOLUTION[1], RESOLUTION[2]];
