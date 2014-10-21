@@ -18,7 +18,7 @@ public class Cell {
 	public void SetVelocity(Vector3 new_velocity) {
 		this.prev_velocity = this.velocity;
 		//new_velocity = Vector3.ClampMagnitude(new_velocity, 1f);
-		this.velocity = new Vector3(allowVelocity.x * new_velocity.x, allowVelocity.y * new_velocity.y, allowVelocity.z * new_velocity.z);	// only  allow changes to allowed velocities (because boundaries)
+		this.velocity = new_velocity;
 		//Debug.DrawLine(position, position + velocity, Color.red);
 	}
 
@@ -161,6 +161,9 @@ public class Grid : MonoBehaviour {
 	public bool UseTexture;
 	public Texture2D ImportedTexture;
 
+	public bool ExternalForce;
+	public Vector3 externalForce;
+
 	void Start() {
 		instance = this;
 		this.system = this.GetComponent<ParticleSystem>();
@@ -184,6 +187,10 @@ public class Grid : MonoBehaviour {
 				}
 			}
 		}
+
+		if (ExternalForce) {
+			ApplyExternalForce();
+		}
 	}
 
 	void Update() {
@@ -200,6 +207,17 @@ public class Grid : MonoBehaviour {
 		Emit();
 
 		UpdateParticleSystem();
+	}
+
+
+	public void ApplyExternalForce() {
+		for (int i = 1; i < RESOLUTION[0]-1; i++) {
+			for (int j = 1; j < RESOLUTION[1]-1; j++) {
+				for (int k = 1; k < RESOLUTION[2]-1; k++) {
+					cells[i, j, k].velocity += externalForce;
+				}
+			}
+		}
 	}
 
 	public void InitializeGrid() {
