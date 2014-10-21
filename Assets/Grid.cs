@@ -5,7 +5,7 @@ using System.Collections.Generic;
 public class Cell {
 	public int[] index = new int[3];
 	public Vector3 position;
-	public Vector3 force;
+	//public Vector3 force;
 	public Vector3 velocity;
 	public Vector3 prev_velocity;
 	public float density;
@@ -19,17 +19,17 @@ public class Cell {
 		this.prev_velocity = this.velocity;
 		new_velocity = Vector3.ClampMagnitude(new_velocity, 1f);
 		this.velocity = new Vector3(allowVelocity.x * new_velocity.x, allowVelocity.y * new_velocity.y, allowVelocity.z * new_velocity.z);	// only  allow changes to allowed velocities (because boundaries)
-		Debug.DrawLine(position, position + velocity, Color.red);
+		//Debug.DrawLine(position, position + velocity, Color.red);
 	}
 
 	public void ForceVelocity(Vector3 new_velocity) {
 		this.prev_velocity = this.velocity;
 		new_velocity = Vector3.ClampMagnitude(new_velocity, 1f);
-		Debug.DrawLine(position, position + velocity, Color.red);
+		//Debug.DrawLine(position, position + velocity, Color.red);
 	}
 
 	public void ChangeVelocity(Vector3 delta) {
-		SetVelocity(this.velocity + delta);
+		SetVelocity(1f * this.velocity + 1f * delta);
 	}
 
 	public void SetBoundary(Vector3 allowVelocity) {
@@ -72,14 +72,19 @@ public class Cell {
 	}
 }
 
+
+
+
+
+
 public class Source {
 	public int[] index = new int[3];
 	public Vector3 direction;
 	public float amount;
 
-	private float initAmount;
+	public float initAmount;
 	private float initTime;
-	private float duration = 1f;
+	private float duration = 0.5f;
 
 	public Source(int[] index, float amount) {
 		Initialize(index, Vector3.zero, amount);
@@ -102,6 +107,8 @@ public class Source {
 		this.direction = Vector3.ClampMagnitude(direction, 1f);
 		this.initAmount = amount;
 		this.initTime = Time.time;
+
+		//Grid.instance.cells[index[0], index[1], index[2]].ChangeVelocity(amount * direction);
 	}
 
 	public void UpdateEmission() {
@@ -113,6 +120,21 @@ public class Source {
 		return (Time.time - initTime < duration);
 	}
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 public class Grid : MonoBehaviour {
 	public static Grid instance;
@@ -141,7 +163,7 @@ public class Grid : MonoBehaviour {
 		this.system = this.GetComponent<ParticleSystem>();
 		this.RESOLUTION = new int[3] {(int) (GRID_RESOLUTION.x+2), (int) (GRID_RESOLUTION.y+2), (int) (GRID_RESOLUTION.z+2)};
 		this.cells = new Cell[RESOLUTION[0], RESOLUTION[1], RESOLUTION[2]];
-		this.particles = new ParticleSystem.Particle[(RESOLUTION[0]-2) * (RESOLUTION[1]-2) * (RESOLUTION[2]-2)];
+		this.particles = new ParticleSystem.Particle[(RESOLUTION[0]) * (RESOLUTION[1]) * (RESOLUTION[2])];
 		this.ORIGIN = this.transform.position;
 		
 		this.PARTICLE_SIZE = GRID_SIZE / Mathf.Max(GRID_RESOLUTION.x, GRID_RESOLUTION.y, GRID_RESOLUTION.z);
@@ -153,14 +175,16 @@ public class Grid : MonoBehaviour {
 		DetectInput();
 
 		Emit();
+		SetBoundaries();
 
 		Diffuse();
 		SetBoundaries();
-		Project();
 
 		Advect();
 		SetBoundaries();
+
 		Project();
+		SetBoundaries();
 
 		UpdateParticleSystem();
 	}
@@ -194,14 +218,14 @@ public class Grid : MonoBehaviour {
 					cells[i, j, k].SetVelocity(new Vector3(0, 0, 0));
 					//cells[i, j, k].SetVelocity(new Vector3(Random.Range(-1f, 1f), Random.Range(-1f, 1f), Random.Range(-1f, 1f))/10f);
 
-					if (!cells[i, j, k].isBoundary) {
+					//if (!cells[i, j, k].isBoundary) {
 						ParticleSystem.Particle p = new ParticleSystem.Particle();
 						p.size = PARTICLE_SIZE;
 						p.position = pos;
 						cells[i, j, k].particle = p;
 						cells[i, j, k].SetDensity(0f);
 						UpdateParticle(i, j, k);
-					}
+					//}
 				}
 			}
 		}
@@ -212,7 +236,12 @@ public class Grid : MonoBehaviour {
 	}
 
 	public void UpdateParticle(int i, int j, int k) {
-		particles[(i-1) + (j-1) * (RESOLUTION[0]-2) + (k-1) * (RESOLUTION[1]-2) * (RESOLUTION[2]-2)] = cells[i, j, k].particle;
+		particles[(i) + (j) * (RESOLUTION[0]) + (k) * (RESOLUTION[1]) * (RESOLUTION[2])] = cells[i, j, k].particle;
+		if (cells[i, j, k].isBoundary) {
+			Debug.DrawLine(cells[i, j, k].position, cells[i, j, k].position + cells[i, j, k].velocity, Color.blue);
+		} else {
+			Debug.DrawLine(cells[i, j, k].position, cells[i, j, k].position + cells[i, j, k].velocity, Color.red);
+		}
 	}
 
 	public ParticleSystem.Particle GetParticle(int i, int j, int k) {
@@ -230,7 +259,7 @@ public class Grid : MonoBehaviour {
 		//Debug.Log("" + i + " " + j + " " + k);
 		if (i > 0 && i < RESOLUTION[0]-1 && j > 0 && j < RESOLUTION[1]-1 && k > 0 && k < RESOLUTION[2]-1) {
 			Vector3 userVelocity = UserObject.GetComponent<CharacterController>().velocity;
-			sources.Add(new Source(new int[] {i, j, k}, userVelocity, 10f * userVelocity.magnitude));
+			sources.Add(new Source(new int[] {i, j, k}, userVelocity, 100f * userVelocity.magnitude));
 			//Debug.Log("within cell " + i + " " + j + " " + k);
 			//Debug.Log(userVelocity);
 		}
@@ -241,6 +270,7 @@ public class Grid : MonoBehaviour {
 			int i = s.index[0];
 			int j = s.index[1];
 			int k = s.index[2];
+			s.UpdateEmission();
 			cells[i, j, k].ChangeDensity(s.amount * dt);
 			cells[i, j, k].ChangeVelocity(s.amount * s.direction * dt);
 			UpdateParticle(i, j, k);	
@@ -280,7 +310,7 @@ public class Grid : MonoBehaviour {
 						cells[i, j, k].SetDensity(newDensity);
 
 						Vector3 newVelocity = (v0[i, j, k] + a * (cells[i+1, j, k].velocity + cells[i-1, j, k].velocity + cells[i, j+1, k].velocity + cells[i, j-1, k].velocity + cells[i, j, k+1].velocity + cells[i, j, k-1].velocity)) / (1+6*a);
-						cells[i, j, k].SetVelocity(newVelocity); 
+						cells[i, j, k].ChangeVelocity(newVelocity); 
 						
 						UpdateParticle(i, j, k);
 					}
@@ -348,7 +378,7 @@ public class Grid : MonoBehaviour {
 		for (int i = 1; i < RESOLUTION[0]-1; i++) {
 			for (int j = 1; j < RESOLUTION[1]-1; j++) {
 				for (int k = 1; k < RESOLUTION[2]-1; k++) {
-					f0[i, j, k] = -0.5f * (h.x * (cells[i-1, j, k].velocity + cells[i+1, j, k].velocity) + h.y * (cells[i, j-1, k].velocity + cells[i, j+1, k].velocity) + h.z * (cells[i, j, k-1].velocity + cells[i, j, k+1].velocity));
+					f0[i, j, k] = -0.5f * (h.x * (cells[i+1, j, k].velocity - cells[i-1, j, k].velocity) + h.y * (cells[i, j+1, k].velocity - cells[i, j-1, k].velocity) + h.z * (cells[i, j, k+1].velocity - cells[i, j, k-1].velocity));
 				}
 			}
 		}
@@ -368,11 +398,11 @@ public class Grid : MonoBehaviour {
 			for (int j = 1; j < RESOLUTION[1]-1; j++) {
 				for (int k = 1; k < RESOLUTION[2]-1; k++) {
 					Vector3 newVelocity = Vector3.zero;
-					newVelocity.x -= 0.5f * (p[i-1, j, k].x + p[i+1, j, k].x) / h.x;
-					newVelocity.y -= 0.5f * (p[i, j-1, k].y + p[i, j+1, k].y) / h.y;
-					newVelocity.z -= 0.5f * (p[i, j, k-1].z + p[i, j, k+1].z) / h.z;
+					newVelocity.x = 0.5f * (p[i+1, j, k].x - p[i-1, j, k].x) / h.x;
+					newVelocity.y = 0.5f * (p[i, j+1, k].y - p[i, j-1, k].y) / h.y;
+					newVelocity.z = 0.5f * (p[i, j, k+1].z - p[i, j, k-1].z) / h.z;
 
-					cells[i, j, k].SetVelocity(newVelocity);
+					cells[i, j, k].SetVelocity(cells[i, j, k].velocity - newVelocity);
 
 					UpdateParticle(i, j, k);
 				}
@@ -397,45 +427,52 @@ public class Grid : MonoBehaviour {
 
 						if ((left && top) || (left && bottom) || (right && top) || (right && bottom) || (left && front) || (left && back) || (right && front) || (right && back) || (top && front) || (top && back) || (bottom && front) || (bottom && back)) {
 							// corners
-							cells[i, j, k].ForceVelocity(Vector3.zero);
+							cells[i, j, k].SetVelocity(Vector3.zero);
 							cells[i, j, k].SetDensity(0f);
 						} else if (left) {
 							newVelocity.x = -1 *cells[i+1, j, k].velocity.x;
 							newVelocity.y = 	cells[i+1, j, k].velocity.y;
 							newVelocity.z = 	cells[i+1, j, k].velocity.z;
-							cells[i, j, k].ForceVelocity(newVelocity);
-							cells[i, j, k].SetDensity(cells[i+1, j, k].density);
+							cells[i, j, k].SetVelocity(newVelocity);
+							//cells[i, j, k].SetDensity(cells[i+1, j, k].density);
+							cells[i, j, k].SetDensity(0f);
 						} else if (right) {
 							newVelocity.x = -1 *cells[i-1, j, k].velocity.x;
 							newVelocity.y = 	cells[i-1, j, k].velocity.y;
 							newVelocity.z = 	cells[i-1, j, k].velocity.z;
-							cells[i, j, k].ForceVelocity(newVelocity);
-							cells[i, j, k].SetDensity(cells[i-1, j, k].density);
+							cells[i, j, k].SetVelocity(newVelocity);
+							//cells[i, j, k].SetDensity(cells[i-1, j, k].density);
+							cells[i, j, k].SetDensity(0f);
 						} else if (bottom) {
 							newVelocity.x = 	cells[i, j+1, k].velocity.x;
 							newVelocity.y = -1 *cells[i, j+1, k].velocity.y;
 							newVelocity.z = 	cells[i, j+1, k].velocity.z;
-							cells[i, j, k].ForceVelocity(newVelocity);
-							cells[i, j, k].SetDensity(cells[i, j+1, k].density);
+							cells[i, j, k].SetVelocity(newVelocity);
+							//cells[i, j, k].SetDensity(cells[i, j+1, k].density);
+							cells[i, j, k].SetDensity(0f);
 						} else if (top) {
 							newVelocity.x = 	cells[i, j-1, k].velocity.x;
 							newVelocity.y = -1 *cells[i, j-1, k].velocity.y;
 							newVelocity.z = 	cells[i, j-1, k].velocity.z;
-							cells[i, j, k].ForceVelocity(newVelocity);
-							cells[i, j, k].SetDensity(cells[i, j-1, k].density);
+							cells[i, j, k].SetVelocity(newVelocity);
+							//cells[i, j, k].SetDensity(cells[i, j-1, k].density);
+							cells[i, j, k].SetDensity(0f);
 						} else if (front) {
 							newVelocity.x = 	cells[i, j, k+1].velocity.x;
 							newVelocity.y = 	cells[i, j, k+1].velocity.y;
 							newVelocity.z = -1 *cells[i, j, k+1].velocity.z;
-							cells[i, j, k].ForceVelocity(newVelocity);
-							cells[i, j, k].SetDensity(cells[i, j, k+1].density);
+							cells[i, j, k].SetVelocity(newVelocity);
+							//cells[i, j, k].SetDensity(cells[i, j, k+1].density);
+							cells[i, j, k].SetDensity(0f);
 						} else if (back) {
 							newVelocity.x = 	cells[i, j, k-1].velocity.x;
 							newVelocity.y =		cells[i, j, k-1].velocity.y;
 							newVelocity.z = -1 *cells[i, j, k-1].velocity.z;
-							cells[i, j, k].ForceVelocity(newVelocity);
-							cells[i, j, k].SetDensity(cells[i, j, k-1].density);
+							cells[i, j, k].SetVelocity(newVelocity);
+							//cells[i, j, k].SetDensity(cells[i, j, k-1].density);
+							cells[i, j, k].SetDensity(0f);
 						}
+						Debug.DrawLine(cells[i, j, k].position, cells[i, j, k].position + cells[i, j, k].velocity, Color.blue);
 					}
 				}
 			}
