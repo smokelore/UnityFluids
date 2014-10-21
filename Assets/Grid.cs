@@ -5,6 +5,7 @@ using System.Collections.Generic;
 public class Cell {
 	public int[] index = new int[3];
 	public Vector3 position;
+	public Vector3 force;
 	public Vector3 velocity;
 	public Vector3 prev_velocity;
 	public float density;
@@ -18,6 +19,12 @@ public class Cell {
 		this.prev_velocity = this.velocity;
 		new_velocity = Vector3.ClampMagnitude(new_velocity, 1f);
 		this.velocity = new Vector3(allowVelocity.x * new_velocity.x, allowVelocity.y * new_velocity.y, allowVelocity.z * new_velocity.z);	// only  allow changes to allowed velocities (because boundaries)
+		Debug.DrawLine(position, position + velocity, Color.red);
+	}
+
+	public void ForceVelocity(Vector3 new_velocity) {
+		this.prev_velocity = this.velocity;
+		new_velocity = Vector3.ClampMagnitude(new_velocity, 1f);
 		Debug.DrawLine(position, position + velocity, Color.red);
 	}
 
@@ -67,32 +74,32 @@ public class Cell {
 
 public class Source {
 	public int[] index = new int[3];
-	public Vector3 forceDirection;
+	public Vector3 direction;
 	public float amount;
 
 	private float initAmount;
 	private float initTime;
-	private float duration = 4f;
+	private float duration = 1f;
 
 	public Source(int[] index, float amount) {
 		Initialize(index, Vector3.zero, amount);
 	}
 
-	public Source(int[] index, Vector3 forceDirection, float amount) {
-		Initialize(index, forceDirection, amount);
+	public Source(int[] index, Vector3 direction, float amount) {
+		Initialize(index, direction, amount);
 	}
 
 	public Source(int i, int j, int k, float amount) {
 		Initialize(new int[3] {i, j, k}, Vector3.zero, amount);
 	}
 
-	public Source(int i, int j, int k, Vector3 forceDirection, float amount) {
-		Initialize(new int[3] {i, j, k}, forceDirection, amount);
+	public Source(int i, int j, int k, Vector3 direction, float amount) {
+		Initialize(new int[3] {i, j, k}, direction, amount);
 	}
 
-	private void Initialize(int[] index, Vector3 forceDirection, float amount) {
+	private void Initialize(int[] index, Vector3 direction, float amount) {
 		this.index = index;
-		this.forceDirection = Vector3.ClampMagnitude(forceDirection, 1f);
+		this.direction = Vector3.ClampMagnitude(direction, 1f);
 		this.initAmount = amount;
 		this.initTime = Time.time;
 	}
@@ -119,7 +126,7 @@ public class Grid : MonoBehaviour {
 	private float PARTICLE_SIZE;
 	public Color highColor, lowColor;
 
-	private float dt = 0;
+	public float dt = 0;
 	public float DIFFUSION_RATE;
 
 	public List<Source> sources = new List<Source>();
@@ -144,9 +151,17 @@ public class Grid : MonoBehaviour {
 	void Update() {
 		this.dt = Time.deltaTime;
 		DetectInput();
+
 		Emit();
+
 		Diffuse();
+		SetBoundaries();
+		Project();
+
 		Advect();
+		SetBoundaries();
+		Project();
+
 		UpdateParticleSystem();
 	}
 
@@ -215,7 +230,7 @@ public class Grid : MonoBehaviour {
 		//Debug.Log("" + i + " " + j + " " + k);
 		if (i > 0 && i < RESOLUTION[0]-1 && j > 0 && j < RESOLUTION[1]-1 && k > 0 && k < RESOLUTION[2]-1) {
 			Vector3 userVelocity = UserObject.GetComponent<CharacterController>().velocity;
-			sources.Add(new Source(new int[] {i, j, k}, userVelocity, 1f * userVelocity.magnitude / dt));
+			sources.Add(new Source(new int[] {i, j, k}, userVelocity, 10f * userVelocity.magnitude));
 			//Debug.Log("within cell " + i + " " + j + " " + k);
 			//Debug.Log(userVelocity);
 		}
@@ -227,7 +242,7 @@ public class Grid : MonoBehaviour {
 			int j = s.index[1];
 			int k = s.index[2];
 			cells[i, j, k].ChangeDensity(s.amount * dt);
-			cells[i, j, k].ChangeVelocity(s.amount * s.direction);
+			cells[i, j, k].ChangeVelocity(s.amount * s.direction * dt);
 			UpdateParticle(i, j, k);	
 		}
 
@@ -294,6 +309,7 @@ public class Grid : MonoBehaviour {
 					float t1 = y - j0;	float t0 = 1-t1;
 					float u1 = z - k0;	float u0 = 1-u1;
 
+					//Debug.Log(i0 + " " + j0 + " " + k0);
 					float d000 = cells[i0, j0, k0].prev_density;
 					float d100 = cells[i1, j0, k0].prev_density;
 					float d010 = cells[i0, j1, k0].prev_density;
@@ -325,10 +341,102 @@ public class Grid : MonoBehaviour {
 	}
 
 	public void Project() {
+		Vector3 h = new Vector3(1f/RESOLUTION[0], 1f/RESOLUTION[1], 1f/RESOLUTION[2]);
+		Vector3[,,] f0 = new Vector3[RESOLUTION[0], RESOLUTION[1], RESOLUTION[2]];
+		Vector3[,,] p = new Vector3[RESOLUTION[0], RESOLUTION[1], RESOLUTION[2]];
+
 		for (int i = 1; i < RESOLUTION[0]-1; i++) {
 			for (int j = 1; j < RESOLUTION[1]-1; j++) {
 				for (int k = 1; k < RESOLUTION[2]-1; k++) {
+					f0[i, j, k] = -0.5f * (h.x * (cells[i-1, j, k].velocity + cells[i+1, j, k].velocity) + h.y * (cells[i, j-1, k].velocity + cells[i, j+1, k].velocity) + h.z * (cells[i, j, k-1].velocity + cells[i, j, k+1].velocity));
+				}
+			}
+		}
 
+		// Gauss-Seidel relaxation
+		for (int r = 0; r < relaxationIterations; r++) {
+			for (int i = 1; i < RESOLUTION[0]-1; i++) {
+				for (int j = 1; j < RESOLUTION[1]-1; j++) {
+					for (int k = 1; k < RESOLUTION[2]-1; k++) {
+						p[i, j, k] = (f0[i, j, k] + p[i-1, j, k] + p[i+1, j, k] + p[i, j-1, k] + p[i, j+1, k] + p[i, j, k-1] + p[i, j, k+1]) / 6f;
+					}
+				}
+			}
+		}
+
+		for (int i = 1; i < RESOLUTION[0]-1; i++) {
+			for (int j = 1; j < RESOLUTION[1]-1; j++) {
+				for (int k = 1; k < RESOLUTION[2]-1; k++) {
+					Vector3 newVelocity = Vector3.zero;
+					newVelocity.x -= 0.5f * (p[i-1, j, k].x + p[i+1, j, k].x) / h.x;
+					newVelocity.y -= 0.5f * (p[i, j-1, k].y + p[i, j+1, k].y) / h.y;
+					newVelocity.z -= 0.5f * (p[i, j, k-1].z + p[i, j, k+1].z) / h.z;
+
+					cells[i, j, k].SetVelocity(newVelocity);
+
+					UpdateParticle(i, j, k);
+				}
+			}
+		}
+	}
+
+	public void SetBoundaries() {
+		for (int i = 0; i < RESOLUTION[0]; i++) {
+			for (int j = 0; j < RESOLUTION[1]; j++) {
+				for (int k = 0; k < RESOLUTION[2]; k++) {
+					if (cells[i, j, k].isBoundary) {
+						bool left = (i == 0);
+						bool bottom = (j == 0);
+						bool front = (k == 0);
+
+						bool right = (i == RESOLUTION[0]-1);
+						bool top = (j == RESOLUTION[1]-1);
+						bool back = (k == RESOLUTION[2]-1);
+
+						Vector3 newVelocity;
+
+						if ((left && top) || (left && bottom) || (right && top) || (right && bottom) || (left && front) || (left && back) || (right && front) || (right && back) || (top && front) || (top && back) || (bottom && front) || (bottom && back)) {
+							// corners
+							cells[i, j, k].ForceVelocity(Vector3.zero);
+							cells[i, j, k].SetDensity(0f);
+						} else if (left) {
+							newVelocity.x = -1 *cells[i+1, j, k].velocity.x;
+							newVelocity.y = 	cells[i+1, j, k].velocity.y;
+							newVelocity.z = 	cells[i+1, j, k].velocity.z;
+							cells[i, j, k].ForceVelocity(newVelocity);
+							cells[i, j, k].SetDensity(cells[i+1, j, k].density);
+						} else if (right) {
+							newVelocity.x = -1 *cells[i-1, j, k].velocity.x;
+							newVelocity.y = 	cells[i-1, j, k].velocity.y;
+							newVelocity.z = 	cells[i-1, j, k].velocity.z;
+							cells[i, j, k].ForceVelocity(newVelocity);
+							cells[i, j, k].SetDensity(cells[i-1, j, k].density);
+						} else if (bottom) {
+							newVelocity.x = 	cells[i, j+1, k].velocity.x;
+							newVelocity.y = -1 *cells[i, j+1, k].velocity.y;
+							newVelocity.z = 	cells[i, j+1, k].velocity.z;
+							cells[i, j, k].ForceVelocity(newVelocity);
+							cells[i, j, k].SetDensity(cells[i, j+1, k].density);
+						} else if (top) {
+							newVelocity.x = 	cells[i, j-1, k].velocity.x;
+							newVelocity.y = -1 *cells[i, j-1, k].velocity.y;
+							newVelocity.z = 	cells[i, j-1, k].velocity.z;
+							cells[i, j, k].ForceVelocity(newVelocity);
+							cells[i, j, k].SetDensity(cells[i, j-1, k].density);
+						} else if (front) {
+							newVelocity.x = 	cells[i, j, k+1].velocity.x;
+							newVelocity.y = 	cells[i, j, k+1].velocity.y;
+							newVelocity.z = -1 *cells[i, j, k+1].velocity.z;
+							cells[i, j, k].ForceVelocity(newVelocity);
+							cells[i, j, k].SetDensity(cells[i, j, k+1].density);
+						} else if (back) {
+							newVelocity.x = 	cells[i, j, k-1].velocity.x;
+							newVelocity.y =		cells[i, j, k-1].velocity.y;
+							newVelocity.z = -1 *cells[i, j, k-1].velocity.z;
+							cells[i, j, k].ForceVelocity(newVelocity);
+							cells[i, j, k].SetDensity(cells[i, j, k-1].density);
+						}
+					}
 				}
 			}
 		}
