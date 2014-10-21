@@ -267,7 +267,7 @@ public class Grid : MonoBehaviour {
 		//Debug.Log("" + i + " " + j + " " + k);
 		if (i > 0 && i < RESOLUTION[0]-1 && j > 0 && j < RESOLUTION[1]-1 && k > 0 && k < RESOLUTION[2]-1) {
 			Vector3 userVelocity = UserObject.GetComponent<CharacterController>().velocity;
-			sources.Add(new Source(new int[] {i, j, k}, userVelocity, 1f * userVelocity.magnitude));
+			sources.Add(new Source(new int[] {i, j, k}, userVelocity, 10f * userVelocity.magnitude));
 			//Debug.Log("within cell " + i + " " + j + " " + k);
 			//Debug.Log(userVelocity);
 		}
@@ -316,7 +316,7 @@ public class Grid : MonoBehaviour {
 						cells[i, j, k].SetDensity(newDensity);
 
 						Vector3 newVelocity = (v0[i, j, k] + a * (cells[i+1, j, k].velocity + cells[i-1, j, k].velocity + cells[i, j+1, k].velocity + cells[i, j-1, k].velocity + cells[i, j, k+1].velocity + cells[i, j, k-1].velocity)) / (1+6*a);
-						cells[i, j, k].ChangeVelocity(newVelocity); 
+						cells[i, j, k].SetVelocity(newVelocity); 
 						
 						UpdateParticle(i, j, k);
 					}
