@@ -84,7 +84,7 @@ public class Source {
 
 	public float initAmount;
 	private float initTime;
-	private float duration = 0.5f;
+	private float duration = 0.1f;
 
 	public Source(int[] index, float amount) {
 		Initialize(index, Vector3.zero, amount);
@@ -108,6 +108,8 @@ public class Source {
 		this.initAmount = amount;
 		this.initTime = Time.time;
 
+		Grid.instance.cells[index[0], index[1], index[2]].ChangeDensity(amount * Grid.instance.dt);
+		Grid.instance.cells[index[0], index[1], index[2]].ChangeVelocity(amount * direction * Grid.instance.dt);
 		//Grid.instance.cells[index[0], index[1], index[2]].ChangeVelocity(amount * direction);
 	}
 
@@ -172,19 +174,16 @@ public class Grid : MonoBehaviour {
 
 	void Update() {
 		this.dt = Time.deltaTime;
+
 		DetectInput();
 
 		Emit();
-		SetBoundaries();
 
 		Diffuse();
-		SetBoundaries();
 
 		Advect();
-		SetBoundaries();
 
 		Project();
-		SetBoundaries();
 
 		UpdateParticleSystem();
 	}
@@ -253,13 +252,22 @@ public class Grid : MonoBehaviour {
 	}
 
 	public void DetectInput() {
+		for (int x = 0; x < RESOLUTION[0]; x++) {
+			for (int y = 0; y < RESOLUTION[1]; y++) {
+				for (int z = 0; z < RESOLUTION[2]; z++) {
+					cells[x, y, z].prev_velocity = Vector3.zero;
+					cells[x, y, z].prev_density = 0f;
+				}
+			}
+		}
+
 		int i = Mathf.RoundToInt((UserObject.transform.position.x - ORIGIN.x) / (PARTICLE_SIZE));
 		int j = Mathf.RoundToInt((UserObject.transform.position.y - ORIGIN.y) / (PARTICLE_SIZE));
 		int k = Mathf.RoundToInt((UserObject.transform.position.z - ORIGIN.z) / (PARTICLE_SIZE));
 		//Debug.Log("" + i + " " + j + " " + k);
 		if (i > 0 && i < RESOLUTION[0]-1 && j > 0 && j < RESOLUTION[1]-1 && k > 0 && k < RESOLUTION[2]-1) {
 			Vector3 userVelocity = UserObject.GetComponent<CharacterController>().velocity;
-			sources.Add(new Source(new int[] {i, j, k}, userVelocity, 100f * userVelocity.magnitude));
+			sources.Add(new Source(new int[] {i, j, k}, userVelocity, 1f * userVelocity.magnitude));
 			//Debug.Log("within cell " + i + " " + j + " " + k);
 			//Debug.Log(userVelocity);
 		}
@@ -271,8 +279,6 @@ public class Grid : MonoBehaviour {
 			int j = s.index[1];
 			int k = s.index[2];
 			s.UpdateEmission();
-			cells[i, j, k].ChangeDensity(s.amount * dt);
-			cells[i, j, k].ChangeVelocity(s.amount * s.direction * dt);
 			UpdateParticle(i, j, k);	
 		}
 
@@ -316,6 +322,7 @@ public class Grid : MonoBehaviour {
 					}
 				}
 			}
+			SetBoundaries();
 		}
 	}
 
@@ -392,17 +399,18 @@ public class Grid : MonoBehaviour {
 					}
 				}
 			}
+			SetBoundaries();
 		}
 
 		for (int i = 1; i < RESOLUTION[0]-1; i++) {
 			for (int j = 1; j < RESOLUTION[1]-1; j++) {
 				for (int k = 1; k < RESOLUTION[2]-1; k++) {
-					Vector3 newVelocity = Vector3.zero;
-					newVelocity.x = 0.5f * (p[i+1, j, k].x - p[i-1, j, k].x) / h.x;
-					newVelocity.y = 0.5f * (p[i, j+1, k].y - p[i, j-1, k].y) / h.y;
-					newVelocity.z = 0.5f * (p[i, j, k+1].z - p[i, j, k-1].z) / h.z;
+					Vector3 newVelocity = cells[i, j, k].velocity;
+					newVelocity.x -= 0.5f * (p[i+1, j, k].x - p[i-1, j, k].x) / h.x;
+					newVelocity.y -= 0.5f * (p[i, j+1, k].y - p[i, j-1, k].y) / h.y;
+					newVelocity.z -= 0.5f * (p[i, j, k+1].z - p[i, j, k-1].z) / h.z;
 
-					cells[i, j, k].SetVelocity(cells[i, j, k].velocity - newVelocity);
+					cells[i, j, k].SetVelocity(newVelocity);
 
 					UpdateParticle(i, j, k);
 				}
@@ -414,64 +422,135 @@ public class Grid : MonoBehaviour {
 		for (int i = 0; i < RESOLUTION[0]; i++) {
 			for (int j = 0; j < RESOLUTION[1]; j++) {
 				for (int k = 0; k < RESOLUTION[2]; k++) {
-					if (cells[i, j, k].isBoundary) {
-						bool left = (i == 0);
-						bool bottom = (j == 0);
-						bool front = (k == 0);
+					bool left = (i == 0);
+					bool bottom = (j == 0);
+					bool front = (k == 0);
 
-						bool right = (i == RESOLUTION[0]-1);
-						bool top = (j == RESOLUTION[1]-1);
-						bool back = (k == RESOLUTION[2]-1);
-
+					bool right = (i == RESOLUTION[0]-1);
+					bool top = (j == RESOLUTION[1]-1);
+					bool back = (k == RESOLUTION[2]-1);
+					if (left || right || bottom || front || top || back) {
 						Vector3 newVelocity;
+						float newDensity;
 
-						if ((left && top) || (left && bottom) || (right && top) || (right && bottom) || (left && front) || (left && back) || (right && front) || (right && back) || (top && front) || (top && back) || (bottom && front) || (bottom && back)) {
-							// corners
-							cells[i, j, k].SetVelocity(Vector3.zero);
-							cells[i, j, k].SetDensity(0f);
+						if (left && bottom && front) {
+							newVelocity = (cells[i+1, j, k].velocity + cells[i, j+1, k].velocity + cells[i, j, k+1].velocity)/3f;
+							cells[i, j, k].SetVelocity(newVelocity);
+							newDensity = (cells[i+1, j, k].density + cells[i, j+1, k].density + cells[i, j, k+1].density)/3f;
+							cells[i, j, k].SetDensity(newDensity);
+						} else if (left && bottom && back) {
+							newVelocity = (cells[i+1, j, k].velocity + cells[i, j+1, k].velocity + cells[i, j, k-1].velocity)/3f;
+							cells[i, j, k].SetVelocity(newVelocity);
+							newDensity = (cells[i+1, j, k].density + cells[i, j+1, k].density + cells[i, j, k-1].density)/3f;
+							cells[i, j, k].SetDensity(newDensity);
+						} else if (left && top && front) {
+							newVelocity = (cells[i+1, j, k].velocity + cells[i, j-1, k].velocity + cells[i, j, k+1].velocity)/3f;
+							cells[i, j, k].SetVelocity(newVelocity);
+							newDensity = (cells[i+1, j, k].density + cells[i, j-1, k].density + cells[i, j, k+1].density)/3f;
+							cells[i, j, k].SetDensity(newDensity);
+						} else if (left && top && back) {
+							newVelocity = (cells[i+1, j, k].velocity + cells[i, j-1, k].velocity + cells[i, j, k-1].velocity)/3f;
+							cells[i, j, k].SetVelocity(newVelocity);
+							newDensity = (cells[i+1, j, k].density + cells[i, j-1, k].density + cells[i, j, k-1].density)/3f;
+							cells[i, j, k].SetDensity(newDensity);
+						} else if (right && bottom && front) {
+							newVelocity = (cells[i-1, j, k].velocity + cells[i, j+1, k].velocity + cells[i, j, k+1].velocity)/3f;
+							cells[i, j, k].SetVelocity(newVelocity);
+							newDensity = (cells[i-1, j, k].density + cells[i, j+1, k].density + cells[i, j, k+1].density)/3f;
+							cells[i, j, k].SetDensity(newDensity);
+						} else if (right && bottom && back) {
+							newVelocity = (cells[i-1, j, k].velocity + cells[i, j+1, k].velocity + cells[i, j, k-1].velocity)/3f;
+							cells[i, j, k].SetVelocity(newVelocity);
+							newDensity = (cells[i-1, j, k].density + cells[i, j+1, k].density + cells[i, j, k-1].density)/3f;
+							cells[i, j, k].SetDensity(newDensity);
+						} else if (right && top && front) {
+							newVelocity = (cells[i-1, j, k].velocity + cells[i, j-1, k].velocity + cells[i, j, k+1].velocity)/3f;
+							cells[i, j, k].SetVelocity(newVelocity);
+							newDensity = (cells[i-1, j, k].density + cells[i, j-1, k].density + cells[i, j, k+1].density)/3f;
+							cells[i, j, k].SetDensity(newDensity);
+						} else if (right && top && back) {
+							newVelocity = (cells[i-1, j, k].velocity + cells[i, j-1, k].velocity + cells[i, j, k-1].velocity)/3f;
+							cells[i, j, k].SetVelocity(newVelocity);
+							newDensity = (cells[i-1, j, k].density + cells[i, j-1, k].density + cells[i, j, k-1].density)/3f;
+							cells[i, j, k].SetDensity(newDensity);
+						} else if (left && bottom) {
+							newVelocity = (cells[i+1, j, k].velocity + cells[i, j+1, k].velocity)/2f;
+							cells[i, j, k].SetVelocity(newVelocity);
+							newDensity = (cells[i+1, j, k].density + cells[i, j+1, k].density)/2f;
+							cells[i, j, k].SetDensity(newDensity);
+						} else if (left && top) {
+							newVelocity = (cells[i+1, j, k].velocity + cells[i, j-1, k].velocity)/2f;
+							cells[i, j, k].SetVelocity(newVelocity);
+							newDensity = (cells[i+1, j, k].density + cells[i, j-1, k].density)/2f;
+							cells[i, j, k].SetDensity(newDensity);
+						} else if (left && front) {
+							newVelocity = (cells[i+1, j, k].velocity + cells[i, j, k+1].velocity)/2f;
+							cells[i, j, k].SetVelocity(newVelocity);
+							newDensity = (cells[i+1, j, k].density + cells[i, j, k+1].density)/2f;
+							cells[i, j, k].SetDensity(newDensity);
+						} else if (left && back) {
+							newVelocity = (cells[i+1, j, k].velocity + cells[i, j, k-1].velocity)/2f;
+							cells[i, j, k].SetVelocity(newVelocity);
+							newDensity = (cells[i+1, j, k].density + cells[i, j, k-1].density)/2f;
+							cells[i, j, k].SetDensity(newDensity);
+						} else if (right && bottom) {
+							newVelocity = (cells[i-1, j, k].velocity + cells[i, j+1, k].velocity)/2f;
+							cells[i, j, k].SetVelocity(newVelocity);
+							newDensity = (cells[i-1, j, k].density + cells[i, j+1, k].density)/2f;
+							cells[i, j, k].SetDensity(newDensity);
+						} else if (right && top) {
+							newVelocity = (cells[i-1, j, k].velocity + cells[i, j-1, k].velocity)/2f;
+							cells[i, j, k].SetVelocity(newVelocity);
+							newDensity = (cells[i-1, j, k].density + cells[i, j-1, k].density)/2f;
+							cells[i, j, k].SetDensity(newDensity);
+						} else if (right && front) {
+							newVelocity = (cells[i-1, j, k].velocity + cells[i, j, k+1].velocity)/2f;
+							cells[i, j, k].SetVelocity(newVelocity);
+							newDensity = (cells[i-1, j, k].density + cells[i, j, k+1].density)/2f;
+							cells[i, j, k].SetDensity(newDensity);
+						} else if (right && back) {
+							newVelocity = (cells[i-1, j, k].velocity + cells[i, j, k-1].velocity)/2f;
+							cells[i, j, k].SetVelocity(newVelocity);
+							newDensity = (cells[i-1, j, k].density + cells[i, j, k-1].density)/2f;
+							cells[i, j, k].SetDensity(newDensity);
 						} else if (left) {
 							newVelocity.x = -1 *cells[i+1, j, k].velocity.x;
 							newVelocity.y = 	cells[i+1, j, k].velocity.y;
 							newVelocity.z = 	cells[i+1, j, k].velocity.z;
 							cells[i, j, k].SetVelocity(newVelocity);
-							//cells[i, j, k].SetDensity(cells[i+1, j, k].density);
-							cells[i, j, k].SetDensity(0f);
+							cells[i, j, k].SetDensity(cells[i+1, j, k].density);
 						} else if (right) {
 							newVelocity.x = -1 *cells[i-1, j, k].velocity.x;
 							newVelocity.y = 	cells[i-1, j, k].velocity.y;
 							newVelocity.z = 	cells[i-1, j, k].velocity.z;
 							cells[i, j, k].SetVelocity(newVelocity);
-							//cells[i, j, k].SetDensity(cells[i-1, j, k].density);
-							cells[i, j, k].SetDensity(0f);
+							cells[i, j, k].SetDensity(cells[i-1, j, k].density);
 						} else if (bottom) {
 							newVelocity.x = 	cells[i, j+1, k].velocity.x;
 							newVelocity.y = -1 *cells[i, j+1, k].velocity.y;
 							newVelocity.z = 	cells[i, j+1, k].velocity.z;
 							cells[i, j, k].SetVelocity(newVelocity);
-							//cells[i, j, k].SetDensity(cells[i, j+1, k].density);
-							cells[i, j, k].SetDensity(0f);
+							cells[i, j, k].SetDensity(cells[i, j+1, k].density);
 						} else if (top) {
 							newVelocity.x = 	cells[i, j-1, k].velocity.x;
 							newVelocity.y = -1 *cells[i, j-1, k].velocity.y;
 							newVelocity.z = 	cells[i, j-1, k].velocity.z;
 							cells[i, j, k].SetVelocity(newVelocity);
-							//cells[i, j, k].SetDensity(cells[i, j-1, k].density);
-							cells[i, j, k].SetDensity(0f);
+							cells[i, j, k].SetDensity(cells[i, j-1, k].density);
 						} else if (front) {
 							newVelocity.x = 	cells[i, j, k+1].velocity.x;
 							newVelocity.y = 	cells[i, j, k+1].velocity.y;
 							newVelocity.z = -1 *cells[i, j, k+1].velocity.z;
 							cells[i, j, k].SetVelocity(newVelocity);
-							//cells[i, j, k].SetDensity(cells[i, j, k+1].density);
-							cells[i, j, k].SetDensity(0f);
+							cells[i, j, k].SetDensity(cells[i, j, k+1].density);
 						} else if (back) {
 							newVelocity.x = 	cells[i, j, k-1].velocity.x;
 							newVelocity.y =		cells[i, j, k-1].velocity.y;
 							newVelocity.z = -1 *cells[i, j, k-1].velocity.z;
 							cells[i, j, k].SetVelocity(newVelocity);
-							//cells[i, j, k].SetDensity(cells[i, j, k-1].density);
-							cells[i, j, k].SetDensity(0f);
+							cells[i, j, k].SetDensity(cells[i, j, k-1].density);
 						}
+						UpdateParticle(i, j, k);
 						Debug.DrawLine(cells[i, j, k].position, cells[i, j, k].position + cells[i, j, k].velocity, Color.blue);
 					}
 				}
