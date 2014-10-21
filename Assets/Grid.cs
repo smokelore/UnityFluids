@@ -26,14 +26,8 @@ public class Cell {
 		SetVelocity(1f * this.velocity + 1f * delta);
 	}
 
-	public void SetBoundary(Vector3 allowVelocity) {
-		allowVelocity = new Vector3(Mathf.Clamp(Mathf.Round(allowVelocity.x), 0f, 1f), Mathf.Clamp(Mathf.Round(allowVelocity.y), 0f, 1f), Mathf.Clamp(Mathf.Round(allowVelocity.z), 0f, 1f));
-		this.allowVelocity = allowVelocity;
-		if (allowVelocity != Vector3.one) {
-			this.isBoundary = true;
-		} else {
-			this.isBoundary = false;
-		}
+	public void SetAsBoundary() {
+		this.isBoundary = true;
 		//Debug.Log("" + index[0] + " " + index[1] + " " + index[2] + " : " + isBoundary);
 	}
 
@@ -51,9 +45,14 @@ public class Cell {
 		SetDensity(this.density[colorIndex] + delta_density, colorIndex);
 	}
 
-	private void UpdateColor() {
-		Color rgb = new Color(density[0], density[1], density[2], Mathf.Max(density[0], density[1], density[2]));
-		particle.color = rgb;
+	public void UpdateColor() {
+		if (!isBoundary) {
+			Color rgb = new Color(density[0], density[1], density[2], 1f);
+			if (!Grid.instance.UseTexture) {
+				rgb.a = Mathf.Max(density[0], density[1], density[2]);
+			}
+			particle.color = rgb;
+		}
 	}
 
 	public bool PointIsWithin(Vector3 testPosition) {
@@ -107,7 +106,9 @@ public class Source {
 		float progress = (Time.time - initTime)/duration;
 		this.amount = Mathf.Lerp(0f, initAmount, Mathf.Pow(progress+0.25f, 2f));
 
-		Grid.instance.cells[index[0], index[1], index[2]].ChangeDensity(amount * 10 * Grid.instance.dt, colorIndex);
+		if (!Grid.instance.UseTexture) {
+			Grid.instance.cells[index[0], index[1], index[2]].ChangeDensity(amount * 10 * Grid.instance.dt, colorIndex);
+		}
 		Grid.instance.cells[index[0], index[1], index[2]].ChangeVelocity(amount * direction * Grid.instance.dt);
 		Grid.instance.UpdateParticle(index[0], index[1], index[2]);
 	}
@@ -157,6 +158,9 @@ public class Grid : MonoBehaviour {
 
 	public int ChosenColor;
 
+	public bool UseTexture;
+	public Texture2D ImportedTexture;
+
 	void Start() {
 		instance = this;
 		this.system = this.GetComponent<ParticleSystem>();
@@ -167,6 +171,19 @@ public class Grid : MonoBehaviour {
 		
 		this.PARTICLE_SIZE = GRID_SIZE / Mathf.Max(GRID_RESOLUTION.x, GRID_RESOLUTION.y, GRID_RESOLUTION.z);
 		InitializeGrid();
+
+		if (UseTexture) {
+			DIFFUSION_RATE /= 100;
+			for (int x = 0; x < RESOLUTION[0]; x++) {
+				for (int y = 0; y < RESOLUTION[1]; y++) {
+					for (int z = 0; z < RESOLUTION[2]; z++) {
+						Color pixelColor = ImportedTexture.GetPixel(x, z);
+						cells[x, y, z].density = new float[3] { pixelColor.r, pixelColor.g, pixelColor.b };
+						//cells[x, y, z].UpdateColor();
+					}
+				}
+			}
+		}
 	}
 
 	void Update() {
@@ -193,6 +210,18 @@ public class Grid : MonoBehaviour {
 					cells[i, j, k] = new Cell();
 					cells[i, j, k].position = pos;
 					cells[i, j, k].index = new int[] {i, j, k};
+
+					bool left = (i == 0);
+					bool bottom = (j == 0);
+					bool front = (k == 0);
+
+					bool right = (i == RESOLUTION[0]-1);
+					bool top = (j == RESOLUTION[1]-1);
+					bool back = (k == RESOLUTION[2]-1);
+
+					if (left || bottom || front || right || top || back) {
+						cells[i, j, k].SetAsBoundary();
+					}
 
 					ParticleSystem.Particle p = new ParticleSystem.Particle();
 					p.size = PARTICLE_SIZE;
