@@ -46,15 +46,41 @@ public class Cell {
 	public void ChangeDensity(float delta_density) {
 		SetDensity(this.density + delta_density);
 	}
+
+	public bool PointIsWithin(Vector3 testPosition) {
+		if (!isBoundary) {
+			Vector3 minExtents = this.position - Vector3.one * this.particle.size/2;
+			Vector3 maxExtents = this.position + Vector3.one * this.particle.size/2;
+			return (testPosition.x < maxExtents.x && testPosition.x >= minExtents.x
+					&& testPosition.y < maxExtents.y && testPosition.y >= minExtents.y
+					&& testPosition.z < maxExtents.z && testPosition.z >= minExtents.z);
+		} else {
+			return false;
+		}
+	}
 }
 
 public class Source {
 	public int[] index = new int[3];
 	public float amount;
 
+	private float initAmount;
+	private float initTime;
+	private float duration = 2f;
+
 	public Source(int[] index, float amount) {
 		this.index = index;
 		this.amount = amount;
+		this.initAmount = amount;
+		this.initTime = Time.time;
+	}
+
+	public void UpdateEmission() {
+		this.amount = Mathf.Lerp(Time.time - initTime, duration, initAmount);
+	}
+
+	public bool isAlive() {
+		return (Time.time - initTime < duration);
 	}
 }
 
@@ -76,6 +102,10 @@ public class Grid : MonoBehaviour {
 	public List<Source> sources = new List<Source>();
 	private ParticleSystem.Particle[] particles;
 
+	public GameObject UserBlock;
+
+	public int relaxationIterations;
+
 	void Start() {
 		instance = this;
 		this.system = this.GetComponent<ParticleSystem>();
@@ -86,12 +116,11 @@ public class Grid : MonoBehaviour {
 		
 		this.PARTICLE_SIZE = GRID_SIZE / Mathf.Max(GRID_RESOLUTION.x, GRID_RESOLUTION.y, GRID_RESOLUTION.z);
 		InitializeGrid();
-
-		sources.Add(new Source(new int[3] {3, 3, 3}, 10f));
 	}
 
 	void Update() {
 		this.dt = Time.deltaTime;
+		DetectInput();
 		Emit();
 		Diffuse();
 		UpdateParticleSystem();
@@ -129,7 +158,7 @@ public class Grid : MonoBehaviour {
 						p.size = PARTICLE_SIZE;
 						p.position = pos;
 						cells[i, j, k].particle = p;
-						cells[i, j, k].SetDensity(Random.Range(0f,1f)); //TEMPORARY, make just 0f later
+						cells[i, j, k].SetDensity(Random.Range(0f, 1f)); //TEMPORARY, make just 0f later
 						UpdateParticle(i, j, k);
 					}
 				}
@@ -170,14 +199,35 @@ public class Grid : MonoBehaviour {
 		cells[i, j, k].particle = p;
 	}
 
+	public void DetectInput() {
+		int i = (int) Mathf.Round((UserBlock.transform.position.x - ORIGIN.x) / (PARTICLE_SIZE));
+		int j = (int) Mathf.Round((UserBlock.transform.position.y - ORIGIN.y) / (PARTICLE_SIZE));
+		int k = (int) Mathf.Round((UserBlock.transform.position.z - ORIGIN.z) / (PARTICLE_SIZE));
+		//Debug.Log("" + i + " " + j + " " + k);
+		if (i > 0 && i < RESOLUTION[0]-1 && j > 0 && j < RESOLUTION[1]-1 && k > 0 && k < RESOLUTION[2]-1) {
+			sources.Add(new Source(new int[] {i, j, k}, 3f));
+			//Debug.Log("within cell " + i + " " + j + " " + k);
+		}
+	}
+
 	public void Emit() {
+		for (int a = 0; a < sources.Count; a++) {
+			if (!sources[a].isAlive()) {
+				sources.RemoveAt(a);
+			} else {
+				sources[a].UpdateEmission();
+			}
+		}
+
 		foreach (Source s in sources) {
 			int i = s.index[0];
 			int j = s.index[1];
 			int k = s.index[2];
 			cells[i, j, k].ChangeDensity(s.amount * dt);
-			UpdateParticle(i, j, k);
+			UpdateParticle(i, j, k);	
 		}
+
+		//	Debug.Log(sources.Count);
 	}
 
 	public void Diffuse() {
@@ -194,7 +244,7 @@ public class Grid : MonoBehaviour {
 		}
 
 		// Gauss-Seidel relaxation
-		for (int r = 0; r < 20; r++) {
+		for (int r = 0; r < relaxationIterations; r++) {
 			for (int i = 1; i < RESOLUTION[0]-1; i++) {
 				for (int j = 1; j < RESOLUTION[1]-1; j++) {
 					for (int k = 1; k < RESOLUTION[2]-1; k++) {
