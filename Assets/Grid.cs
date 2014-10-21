@@ -17,14 +17,15 @@ public class Cell {
 
 	public void SetVelocity(Vector3 new_velocity) {
 		this.prev_velocity = this.velocity;
-		new_velocity = Vector3.ClampMagnitude(new_velocity, 1f);
+		//new_velocity = Vector3.ClampMagnitude(new_velocity, 1f);
 		this.velocity = new Vector3(allowVelocity.x * new_velocity.x, allowVelocity.y * new_velocity.y, allowVelocity.z * new_velocity.z);	// only  allow changes to allowed velocities (because boundaries)
 		//Debug.DrawLine(position, position + velocity, Color.red);
 	}
 
 	public void ForceVelocity(Vector3 new_velocity) {
 		this.prev_velocity = this.velocity;
-		new_velocity = Vector3.ClampMagnitude(new_velocity, 1f);
+		//new_velocity = Vector3.ClampMagnitude(new_velocity, 1f);
+		this.velocity = new_velocity;
 		//Debug.DrawLine(position, position + velocity, Color.red);
 	}
 
@@ -84,7 +85,7 @@ public class Source {
 
 	public float initAmount;
 	private float initTime;
-	private float duration = 0.1f;
+	private float duration = 0f;
 
 	public Source(int[] index, float amount) {
 		Initialize(index, Vector3.zero, amount);
@@ -110,6 +111,7 @@ public class Source {
 
 		Grid.instance.cells[index[0], index[1], index[2]].ChangeDensity(amount * Grid.instance.dt);
 		Grid.instance.cells[index[0], index[1], index[2]].ChangeVelocity(amount * direction * Grid.instance.dt);
+		Grid.instance.UpdateParticle(index[0], index[1], index[2]);
 		//Grid.instance.cells[index[0], index[1], index[2]].ChangeVelocity(amount * direction);
 	}
 
@@ -157,6 +159,7 @@ public class Grid : MonoBehaviour {
 	private ParticleSystem.Particle[] particles;
 
 	public GameObject UserObject;
+	public float UserStrength;
 
 	public int relaxationIterations;
 
@@ -177,13 +180,13 @@ public class Grid : MonoBehaviour {
 
 		DetectInput();
 
-		Emit();
-
 		Diffuse();
 
 		Advect();
 
 		Project();
+
+		Emit();
 
 		UpdateParticleSystem();
 	}
@@ -223,7 +226,6 @@ public class Grid : MonoBehaviour {
 						p.position = pos;
 						cells[i, j, k].particle = p;
 						cells[i, j, k].SetDensity(0f);
-						UpdateParticle(i, j, k);
 					//}
 				}
 			}
@@ -231,6 +233,14 @@ public class Grid : MonoBehaviour {
 	}
 
 	public void UpdateParticleSystem() {
+		for (int i = 0; i < RESOLUTION[0]; i++) {
+			for (int j = 0; j < RESOLUTION[1]; j++) {
+				for (int k = 0; k < RESOLUTION[2]; k++) {
+					UpdateParticle(i, j, k);
+				}
+			}
+		}
+
 		system.SetParticles(particles, particles.Length);
 	}
 
@@ -257,6 +267,7 @@ public class Grid : MonoBehaviour {
 				for (int z = 0; z < RESOLUTION[2]; z++) {
 					cells[x, y, z].prev_velocity = Vector3.zero;
 					cells[x, y, z].prev_density = 0f;
+					UpdateParticle(x, y, z);
 				}
 			}
 		}
@@ -267,28 +278,30 @@ public class Grid : MonoBehaviour {
 		//Debug.Log("" + i + " " + j + " " + k);
 		if (i > 0 && i < RESOLUTION[0]-1 && j > 0 && j < RESOLUTION[1]-1 && k > 0 && k < RESOLUTION[2]-1) {
 			Vector3 userVelocity = UserObject.GetComponent<CharacterController>().velocity;
-			sources.Add(new Source(new int[] {i, j, k}, userVelocity, 10f * userVelocity.magnitude));
+			sources.Add(new Source(new int[] {i, j, k}, userVelocity, UserStrength * userVelocity.magnitude));
 			//Debug.Log("within cell " + i + " " + j + " " + k);
 			//Debug.Log(userVelocity);
 		}
 	}
 
 	public void Emit() {
-		foreach (Source s in sources) {
+		/*foreach (Source s in sources) {
 			int i = s.index[0];
 			int j = s.index[1];
 			int k = s.index[2];
-			s.UpdateEmission();
-			UpdateParticle(i, j, k);	
-		}
+			s.UpdateEmission	
+		}*/
+
+		List<Source> keep = new List<Source>();
 
 		for (int a = 0; a < sources.Count; a++) {
-			if (!sources[a].isAlive()) {
-				sources.RemoveAt(a);
-			} else {
+			if (sources[a].isAlive()) {
 				sources[a].UpdateEmission();
+				keep.Add(sources[a]);
 			}
 		}
+
+		sources = keep;
 		//	Debug.Log(sources.Count);
 	}
 
@@ -313,12 +326,15 @@ public class Grid : MonoBehaviour {
 				for (int j = 1; j < RESOLUTION[1]-1; j++) {
 					for (int k = 1; k < RESOLUTION[2]-1; k++) {
 						float newDensity = (d0[i, j, k] + a * (cells[i+1, j, k].density + cells[i-1, j, k].density + cells[i, j+1, k].density + cells[i, j-1, k].density + cells[i, j, k+1].density + cells[i, j, k-1].density)) / (1+6*a);
-						cells[i, j, k].SetDensity(newDensity);
-
 						Vector3 newVelocity = (v0[i, j, k] + a * (cells[i+1, j, k].velocity + cells[i-1, j, k].velocity + cells[i, j+1, k].velocity + cells[i, j-1, k].velocity + cells[i, j, k+1].velocity + cells[i, j, k-1].velocity)) / (1+6*a);
-						cells[i, j, k].SetVelocity(newVelocity); 
-						
-						UpdateParticle(i, j, k);
+
+						if (r == relaxationIterations-1) {
+							cells[i, j, k].SetDensity(newDensity);
+							cells[i, j, k].SetVelocity(newVelocity);
+						} else {
+							cells[i, j, k].density = newDensity;
+							cells[i, j, k].velocity = newVelocity;
+						}				
 					}
 				}
 			}
@@ -370,8 +386,6 @@ public class Grid : MonoBehaviour {
 
 				 	Vector3 newVelocity = s0 * (t0 * (u0 * v000 + u1 * v001) + t1 * (u0 * v010 + u1 * v011)) + s1 * (t0 * (u0 * v100 + u1 * v101) + t1 * (u0 * v110 + u1 * v111));
 					cells[i, j, k].SetVelocity(newVelocity);
-
-					UpdateParticle(i, j, k);
 				}
 			}
 		}
@@ -402,6 +416,8 @@ public class Grid : MonoBehaviour {
 			SetBoundaries();
 		}
 
+
+
 		for (int i = 1; i < RESOLUTION[0]-1; i++) {
 			for (int j = 1; j < RESOLUTION[1]-1; j++) {
 				for (int k = 1; k < RESOLUTION[2]-1; k++) {
@@ -411,8 +427,6 @@ public class Grid : MonoBehaviour {
 					newVelocity.z -= 0.5f * (p[i, j, k+1].z - p[i, j, k-1].z) / h.z;
 
 					cells[i, j, k].SetVelocity(newVelocity);
-
-					UpdateParticle(i, j, k);
 				}
 			}
 		}
@@ -550,7 +564,6 @@ public class Grid : MonoBehaviour {
 							cells[i, j, k].SetVelocity(newVelocity);
 							cells[i, j, k].SetDensity(cells[i, j, k-1].density);
 						}
-						UpdateParticle(i, j, k);
 						Debug.DrawLine(cells[i, j, k].position, cells[i, j, k].position + cells[i, j, k].velocity, Color.blue);
 					}
 				}
