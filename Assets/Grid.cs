@@ -5,7 +5,7 @@ using System.Collections.Generic;
 public class Cell {
 	public int[] index = new int[3];
 	public Vector3 position;
-	//public Vector3 force;
+	public Vector3 pressure;
 	public Vector3 velocity;
 	public Vector3 prev_velocity;
 	public float density;
@@ -85,7 +85,7 @@ public class Source {
 
 	public float initAmount;
 	private float initTime;
-	private float duration = 0f;
+	private float duration;
 
 	public Source(int[] index, float amount) {
 		Initialize(index, Vector3.zero, amount);
@@ -108,16 +108,21 @@ public class Source {
 		this.direction = Vector3.ClampMagnitude(direction, 1f);
 		this.initAmount = amount;
 		this.initTime = Time.time;
+		this.duration = Grid.instance.SourceDuration;
 
-		Grid.instance.cells[index[0], index[1], index[2]].ChangeDensity(amount * Grid.instance.dt);
+		/*Grid.instance.cells[index[0], index[1], index[2]].ChangeDensity(amount * 10 * Grid.instance.dt);
 		Grid.instance.cells[index[0], index[1], index[2]].ChangeVelocity(amount * direction * Grid.instance.dt);
-		Grid.instance.UpdateParticle(index[0], index[1], index[2]);
+		Grid.instance.UpdateParticle(index[0], index[1], index[2]);*/
 		//Grid.instance.cells[index[0], index[1], index[2]].ChangeVelocity(amount * direction);
 	}
 
 	public void UpdateEmission() {
 		float progress = (Time.time - initTime)/duration;
-		this.amount = Mathf.Lerp(0f, 1f, Mathf.Pow(progress+0.25f, 2f));
+		this.amount = Mathf.Lerp(0f, initAmount, Mathf.Pow(progress+0.25f, 2f));
+
+		Grid.instance.cells[index[0], index[1], index[2]].ChangeDensity(amount * 10 * Grid.instance.dt);
+		Grid.instance.cells[index[0], index[1], index[2]].ChangeVelocity(amount * direction * Grid.instance.dt);
+		Grid.instance.UpdateParticle(index[0], index[1], index[2]);
 	}
 
 	public bool isAlive() {
@@ -159,7 +164,8 @@ public class Grid : MonoBehaviour {
 	private ParticleSystem.Particle[] particles;
 
 	public GameObject UserObject;
-	public float UserStrength;
+	public float SourceStrength;
+	public float SourceDuration;
 
 	public int relaxationIterations;
 
@@ -278,7 +284,7 @@ public class Grid : MonoBehaviour {
 		//Debug.Log("" + i + " " + j + " " + k);
 		if (i > 0 && i < RESOLUTION[0]-1 && j > 0 && j < RESOLUTION[1]-1 && k > 0 && k < RESOLUTION[2]-1) {
 			Vector3 userVelocity = UserObject.GetComponent<CharacterController>().velocity;
-			sources.Add(new Source(new int[] {i, j, k}, userVelocity, UserStrength * userVelocity.magnitude));
+			sources.Add(new Source(new int[] {i, j, k}, userVelocity, SourceStrength * userVelocity.magnitude));
 			//Debug.Log("within cell " + i + " " + j + " " + k);
 			//Debug.Log(userVelocity);
 		}
@@ -328,17 +334,18 @@ public class Grid : MonoBehaviour {
 						float newDensity = (d0[i, j, k] + a * (cells[i+1, j, k].density + cells[i-1, j, k].density + cells[i, j+1, k].density + cells[i, j-1, k].density + cells[i, j, k+1].density + cells[i, j, k-1].density)) / (1+6*a);
 						Vector3 newVelocity = (v0[i, j, k] + a * (cells[i+1, j, k].velocity + cells[i-1, j, k].velocity + cells[i, j+1, k].velocity + cells[i, j-1, k].velocity + cells[i, j, k+1].velocity + cells[i, j, k-1].velocity)) / (1+6*a);
 
-						if (r == relaxationIterations-1) {
+						//f (r == relaxationIterations-1) {
 							cells[i, j, k].SetDensity(newDensity);
 							cells[i, j, k].SetVelocity(newVelocity);
-						} else {
-							cells[i, j, k].density = newDensity;
-							cells[i, j, k].velocity = newVelocity;
-						}				
+						//} else {
+						//	cells[i, j, k].density = newDensity;
+						//	cells[i, j, k].velocity = newVelocity;
+						//}				
 					}
 				}
 			}
-			SetBoundaries();
+			SetDensityBoundaries();
+			SetVelocityBoundaries();
 		}
 	}
 
@@ -394,7 +401,6 @@ public class Grid : MonoBehaviour {
 	public void Project() {
 		Vector3 h = new Vector3(1f/RESOLUTION[0], 1f/RESOLUTION[1], 1f/RESOLUTION[2]);
 		Vector3[,,] f0 = new Vector3[RESOLUTION[0], RESOLUTION[1], RESOLUTION[2]];
-		Vector3[,,] p = new Vector3[RESOLUTION[0], RESOLUTION[1], RESOLUTION[2]];
 
 		for (int i = 1; i < RESOLUTION[0]-1; i++) {
 			for (int j = 1; j < RESOLUTION[1]-1; j++) {
@@ -409,11 +415,11 @@ public class Grid : MonoBehaviour {
 			for (int i = 1; i < RESOLUTION[0]-1; i++) {
 				for (int j = 1; j < RESOLUTION[1]-1; j++) {
 					for (int k = 1; k < RESOLUTION[2]-1; k++) {
-						p[i, j, k] = (f0[i, j, k] + p[i-1, j, k] + p[i+1, j, k] + p[i, j-1, k] + p[i, j+1, k] + p[i, j, k-1] + p[i, j, k+1]) / 6f;
+						cells[i, j, k].pressure = (f0[i, j, k] + cells[i-1, j, k].pressure + cells[i+1, j, k].pressure + cells[i, j-1, k].pressure + cells[i, j+1, k].pressure + cells[i, j, k-1].pressure + cells[i, j, k+1].pressure) / 6f;
 					}
 				}
 			}
-			SetBoundaries();
+			SetPressureBoundaries();
 		}
 
 
@@ -422,9 +428,9 @@ public class Grid : MonoBehaviour {
 			for (int j = 1; j < RESOLUTION[1]-1; j++) {
 				for (int k = 1; k < RESOLUTION[2]-1; k++) {
 					Vector3 newVelocity = cells[i, j, k].velocity;
-					newVelocity.x -= 0.5f * (p[i+1, j, k].x - p[i-1, j, k].x) / h.x;
-					newVelocity.y -= 0.5f * (p[i, j+1, k].y - p[i, j-1, k].y) / h.y;
-					newVelocity.z -= 0.5f * (p[i, j, k+1].z - p[i, j, k-1].z) / h.z;
+					newVelocity.x -= 0.5f * (cells[i+1, j, k].pressure.x - cells[i-1, j, k].pressure.x) / h.x;
+					newVelocity.y -= 0.5f * (cells[i, j+1, k].pressure.y - cells[i, j-1, k].pressure.y) / h.y;
+					newVelocity.z -= 0.5f * (cells[i, j, k+1].pressure.z - cells[i, j, k-1].pressure.z) / h.z;
 
 					cells[i, j, k].SetVelocity(newVelocity);
 				}
@@ -432,10 +438,308 @@ public class Grid : MonoBehaviour {
 		}
 	}
 
-	public void SetBoundaries() {
-		for (int i = 0; i < RESOLUTION[0]; i++) {
-			for (int j = 0; j < RESOLUTION[1]; j++) {
-				for (int k = 0; k < RESOLUTION[2]; k++) {
+	/*public void SetBoundaries() {
+		for (int i = 0; i < RESOLUTION[0]; i += RESOLUTION[0]-1) {
+			for (int j = 0; j < RESOLUTION[1]; j += RESOLUTION[1]-1) {
+				for (int k = 0; k < RESOLUTION[2]; k += RESOLUTION[2]-1) {
+					bool left = (i == 0);
+					bool bottom = (j == 0);
+					bool front = (k == 0);
+
+					bool right = (i == RESOLUTION[0]-1);
+					bool top = (j == RESOLUTION[1]-1);
+					bool back = (k == RESOLUTION[2]-1);
+					if (left || right || bottom || front || top || back) {
+						Vector3 newVelocity, newPressure;
+						float newDensity;
+
+						if (left && bottom && front) {
+							newVelocity = (cells[i+1, j, k].velocity + cells[i, j+1, k].velocity + cells[i, j, k+1].velocity)/3f;
+							cells[i, j, k].SetVelocity(newVelocity);
+							newDensity = (cells[i+1, j, k].density + cells[i, j+1, k].density + cells[i, j, k+1].density)/3f;
+							cells[i, j, k].SetDensity(newDensity);
+							newPressure = (cells[i+1, j, k].pressure + cells[i, j+1, k].pressure + cells[i, j, k+1].pressure)/3f;
+							cells[i, j, k].pressure = newPressure;
+						} else if (left && bottom && back) {
+							newVelocity = (cells[i+1, j, k].velocity + cells[i, j+1, k].velocity + cells[i, j, k-1].velocity)/3f;
+							cells[i, j, k].SetVelocity(newVelocity);
+							newDensity = (cells[i+1, j, k].density + cells[i, j+1, k].density + cells[i, j, k-1].density)/3f;
+							cells[i, j, k].SetDensity(newDensity);
+							newPressure = (cells[i+1, j, k].pressure + cells[i, j+1, k].pressure + cells[i, j, k-1].pressure)/3f;
+							cells[i, j, k].pressure = newPressure;
+						} else if (left && top && front) {
+							newVelocity = (cells[i+1, j, k].velocity + cells[i, j-1, k].velocity + cells[i, j, k+1].velocity)/3f;
+							cells[i, j, k].SetVelocity(newVelocity);
+							newDensity = (cells[i+1, j, k].density + cells[i, j-1, k].density + cells[i, j, k+1].density)/3f;
+							cells[i, j, k].SetDensity(newDensity);
+							newPressure = (cells[i+1, j, k].pressure + cells[i, j-1, k].pressure + cells[i, j, k+1].pressure)/3f;
+							cells[i, j, k].pressure = newPressure;
+						} else if (left && top && back) {
+							newVelocity = (cells[i+1, j, k].velocity + cells[i, j-1, k].velocity + cells[i, j, k-1].velocity)/3f;
+							cells[i, j, k].SetVelocity(newVelocity);
+							newDensity = (cells[i+1, j, k].density + cells[i, j-1, k].density + cells[i, j, k-1].density)/3f;
+							cells[i, j, k].SetDensity(newDensity);
+							newPressure = (cells[i+1, j, k].pressure + cells[i, j-1, k].pressure + cells[i, j, k-1].pressure)/3f;
+							cells[i, j, k].pressure = newPressure;
+						} else if (right && bottom && front) {
+							newVelocity = (cells[i-1, j, k].velocity + cells[i, j+1, k].velocity + cells[i, j, k+1].velocity)/3f;
+							cells[i, j, k].SetVelocity(newVelocity);
+							newDensity = (cells[i-1, j, k].density + cells[i, j+1, k].density + cells[i, j, k+1].density)/3f;
+							cells[i, j, k].SetDensity(newDensity);
+							newPressure = (cells[i-1, j, k].pressure + cells[i, j+1, k].pressure + cells[i, j, k+1].pressure)/3f;
+							cells[i, j, k].pressure = newPressure;
+						} else if (right && bottom && back) {
+							newVelocity = (cells[i-1, j, k].velocity + cells[i, j+1, k].velocity + cells[i, j, k-1].velocity)/3f;
+							cells[i, j, k].SetVelocity(newVelocity);
+							newDensity = (cells[i-1, j, k].density + cells[i, j+1, k].density + cells[i, j, k-1].density)/3f;
+							cells[i, j, k].SetDensity(newDensity);
+							newPressure = (cells[i-1, j, k].pressure + cells[i, j+1, k].pressure + cells[i, j, k-1].pressure)/3f;
+							cells[i, j, k].pressure = newPressure;
+						} else if (right && top && front) {
+							newVelocity = (cells[i-1, j, k].velocity + cells[i, j-1, k].velocity + cells[i, j, k+1].velocity)/3f;
+							cells[i, j, k].SetVelocity(newVelocity);
+							newDensity = (cells[i-1, j, k].density + cells[i, j-1, k].density + cells[i, j, k+1].density)/3f;
+							cells[i, j, k].SetDensity(newDensity);
+							newPressure = (cells[i-1, j, k].pressure + cells[i, j-1, k].pressure + cells[i, j, k+1].pressure)/3f;
+							cells[i, j, k].pressure = newPressure;
+						} else if (right && top && back) {
+							newVelocity = (cells[i-1, j, k].velocity + cells[i, j-1, k].velocity + cells[i, j, k-1].velocity)/3f;
+							cells[i, j, k].SetVelocity(newVelocity);
+							newDensity = (cells[i-1, j, k].density + cells[i, j-1, k].density + cells[i, j, k-1].density)/3f;
+							cells[i, j, k].SetDensity(newDensity);
+							newPressure = (cells[i-1, j, k].pressure + cells[i, j-1, k].pressure + cells[i, j, k-1].pressure)/3f;
+							cells[i, j, k].pressure = newPressure;
+						} else if (left && bottom) {
+							newVelocity = (cells[i+1, j, k].velocity + cells[i, j+1, k].velocity)/2f;
+							cells[i, j, k].SetVelocity(newVelocity);
+							newDensity = (cells[i+1, j, k].density + cells[i, j+1, k].density)/2f;
+							cells[i, j, k].SetDensity(newDensity);
+							newPressure = (cells[i+1, j, k].pressure + cells[i, j+1, k].pressure)/2f;
+							cells[i, j, k].pressure = newPressure;
+						} else if (left && top) {
+							newVelocity = (cells[i+1, j, k].velocity + cells[i, j-1, k].velocity)/2f;
+							cells[i, j, k].SetVelocity(newVelocity);
+							newDensity = (cells[i+1, j, k].density + cells[i, j-1, k].density)/2f;
+							cells[i, j, k].SetDensity(newDensity);
+							newPressure = (cells[i+1, j, k].pressure + cells[i, j-1, k].pressure)/2f;
+							cells[i, j, k].pressure = newPressure;
+						} else if (left && front) {
+							newVelocity = (cells[i+1, j, k].velocity + cells[i, j, k+1].velocity)/2f;
+							cells[i, j, k].SetVelocity(newVelocity);
+							newDensity = (cells[i+1, j, k].density + cells[i, j, k+1].density)/2f;
+							cells[i, j, k].SetDensity(newDensity);
+							newPressure = (cells[i+1, j, k].pressure + cells[i, j, k+1].pressure)/2f;
+							cells[i, j, k].pressure = newPressure;
+						} else if (left && back) {
+							newVelocity = (cells[i+1, j, k].velocity + cells[i, j, k-1].velocity)/2f;
+							cells[i, j, k].SetVelocity(newVelocity);
+							newDensity = (cells[i+1, j, k].density + cells[i, j, k-1].density)/2f;
+							cells[i, j, k].SetDensity(newDensity);
+							newPressure = (cells[i+1, j, k].pressure + cells[i, j, k-1].pressure)/2f;
+							cells[i, j, k].pressure = newPressure;
+						} else if (right && bottom) {
+							newVelocity = (cells[i-1, j, k].velocity + cells[i, j+1, k].velocity)/2f;
+							cells[i, j, k].SetVelocity(newVelocity);
+							newDensity = (cells[i-1, j, k].density + cells[i, j+1, k].density)/2f;
+							cells[i, j, k].SetDensity(newDensity);
+							newPressure = (cells[i-1, j, k].pressure + cells[i, j+1, k].pressure)/2f;
+							cells[i, j, k].pressure = newPressure;
+						} else if (right && top) {
+							newVelocity = (cells[i-1, j, k].velocity + cells[i, j-1, k].velocity)/2f;
+							cells[i, j, k].SetVelocity(newVelocity);
+							newDensity = (cells[i-1, j, k].density + cells[i, j-1, k].density)/2f;
+							cells[i, j, k].SetDensity(newDensity);
+							newPressure = (cells[i-1, j, k].pressure + cells[i, j-1, k].pressure)/2f;
+							cells[i, j, k].pressure = newPressure;
+						} else if (right && front) {
+							newVelocity = (cells[i-1, j, k].velocity + cells[i, j, k+1].velocity)/2f;
+							cells[i, j, k].SetVelocity(newVelocity);
+							newDensity = (cells[i-1, j, k].density + cells[i, j, k+1].density)/2f;
+							cells[i, j, k].SetDensity(newDensity);
+							newPressure = (cells[i-1, j, k].pressure + cells[i, j, k+1].pressure)/2f;
+							cells[i, j, k].pressure = newPressure;
+						} else if (right && back) {
+							newVelocity = (cells[i-1, j, k].velocity + cells[i, j, k-1].velocity)/2f;
+							cells[i, j, k].SetVelocity(newVelocity);
+							newDensity = (cells[i-1, j, k].density + cells[i, j, k-1].density)/2f;
+							cells[i, j, k].SetDensity(newDensity);
+							newPressure = (cells[i-1, j, k].pressure + cells[i, j, k-1].pressure)/2f;
+							cells[i, j, k].pressure = newPressure;
+						} else if (bottom && front) {
+							newVelocity = (cells[i, j+1, k].velocity + cells[i, j, k+1].velocity)/2f;
+							cells[i, j, k].SetVelocity(newVelocity);
+							newDensity = (cells[i, j+1, k].density + cells[i, j, k+1].density)/2f;
+							cells[i, j, k].SetDensity(newDensity);
+							newPressure = (cells[i, j+1, k].pressure + cells[i, j, k+1].pressure)/2f;
+							cells[i, j, k].pressure = newPressure;
+						} else if (bottom && back) {
+							newVelocity = (cells[i, j+1, k].velocity + cells[i, j, k-1].velocity)/2f;
+							cells[i, j, k].SetVelocity(newVelocity);
+							newDensity = (cells[i, j+1, k].density + cells[i, j, k-1].density)/2f;
+							cells[i, j, k].SetDensity(newDensity);
+							newPressure = (cells[i, j+1, k].pressure + cells[i, j, k-1].pressure)/2f;
+							cells[i, j, k].pressure = newPressure;
+						} else if (top && front) {
+							newVelocity = (cells[i, j-1, k].velocity + cells[i, j, k+1].velocity)/2f;
+							cells[i, j, k].SetVelocity(newVelocity);
+							newDensity = (cells[i, j-1, k].density + cells[i, j, k+1].density)/2f;
+							cells[i, j, k].SetDensity(newDensity);
+							newPressure = (cells[i, j-1, k].pressure + cells[i, j, k+1].pressure)/2f;
+							cells[i, j, k].pressure = newPressure;
+						} else if (top && back) {
+							newVelocity = (cells[i, j-1, k].velocity + cells[i, j, k-1].velocity)/2f;
+							cells[i, j, k].SetVelocity(newVelocity);
+							newDensity = (cells[i, j-1, k].density + cells[i, j, k-1].density)/2f;
+							cells[i, j, k].SetDensity(newDensity);
+							newPressure = (cells[i, j-1, k].pressure + cells[i, j, k-1].pressure)/2f;
+							cells[i, j, k].pressure = newPressure;
+						} else if (left) {
+							newVelocity.x = -1 *cells[i+1, j, k].velocity.x;
+							newVelocity.y = 	cells[i+1, j, k].velocity.y;
+							newVelocity.z = 	cells[i+1, j, k].velocity.z;
+							cells[i, j, k].SetVelocity(newVelocity);
+							cells[i, j, k].SetDensity(cells[i+1, j, k].density);
+							cells[i, j, k].pressure = cells[i+1, j, k].pressure;
+						} else if (right) {
+							newVelocity.x = -1 *cells[i-1, j, k].velocity.x;
+							newVelocity.y = 	cells[i-1, j, k].velocity.y;
+							newVelocity.z = 	cells[i-1, j, k].velocity.z;
+							cells[i, j, k].SetVelocity(newVelocity);
+							cells[i, j, k].SetDensity(cells[i-1, j, k].density);
+							cells[i, j, k].pressure = cells[i-1, j, k].pressure;
+						} else if (bottom) {
+							newVelocity.x = 	cells[i, j+1, k].velocity.x;
+							newVelocity.y = -1 *cells[i, j+1, k].velocity.y;
+							newVelocity.z = 	cells[i, j+1, k].velocity.z;
+							cells[i, j, k].SetVelocity(newVelocity);
+							cells[i, j, k].SetDensity(cells[i, j+1, k].density);
+							cells[i, j, k].pressure = cells[i, j+1, k].pressure;
+						} else if (top) {
+							newVelocity.x = 	cells[i, j-1, k].velocity.x;
+							newVelocity.y = -1 *cells[i, j-1, k].velocity.y;
+							newVelocity.z = 	cells[i, j-1, k].velocity.z;
+							cells[i, j, k].SetVelocity(newVelocity);
+							cells[i, j, k].SetDensity(cells[i, j-1, k].density);
+							cells[i, j, k].pressure = cells[i, j-1, k].pressure;
+						} else if (front) {
+							newVelocity.x = 	cells[i, j, k+1].velocity.x;
+							newVelocity.y = 	cells[i, j, k+1].velocity.y;
+							newVelocity.z = -1 *cells[i, j, k+1].velocity.z;
+							cells[i, j, k].SetVelocity(newVelocity);
+							cells[i, j, k].SetDensity(cells[i, j, k+1].density);
+							cells[i, j, k].pressure = cells[i, j, k+1].pressure;
+						} else if (back) {
+							newVelocity.x = 	cells[i, j, k-1].velocity.x;
+							newVelocity.y =		cells[i, j, k-1].velocity.y;
+							newVelocity.z = -1 *cells[i, j, k-1].velocity.z;
+							cells[i, j, k].SetVelocity(newVelocity);
+							cells[i, j, k].SetDensity(cells[i, j, k-1].density);
+							cells[i, j, k].pressure = cells[i, j, k-1].pressure;
+						}
+						Debug.DrawLine(cells[i, j, k].position, cells[i, j, k].position + cells[i, j, k].velocity, Color.blue);
+					}
+				}
+			}
+		}
+	}*/
+
+	public void SetDensityBoundaries() {
+		for (int i = 0; i < RESOLUTION[0]; i += RESOLUTION[0]-1) {
+			for (int j = 0; j < RESOLUTION[1]; j += RESOLUTION[1]-1) {
+				for (int k = 0; k < RESOLUTION[2]; k += RESOLUTION[2]-1) {
+					bool left = (i == 0);
+					bool bottom = (j == 0);
+					bool front = (k == 0);
+
+					bool right = (i == RESOLUTION[0]-1);
+					bool top = (j == RESOLUTION[1]-1);
+					bool back = (k == RESOLUTION[2]-1);
+					if (left || right || bottom || front || top || back) {
+						float newDensity;
+
+						if (left && bottom && front) {
+							newDensity = (cells[i+1, j, k].density + cells[i, j+1, k].density + cells[i, j, k+1].density)/3f;
+							cells[i, j, k].SetDensity(newDensity);
+						} else if (left && bottom && back) {
+							newDensity = (cells[i+1, j, k].density + cells[i, j+1, k].density + cells[i, j, k-1].density)/3f;
+							cells[i, j, k].SetDensity(newDensity);
+						} else if (left && top && front) {
+							newDensity = (cells[i+1, j, k].density + cells[i, j-1, k].density + cells[i, j, k+1].density)/3f;
+							cells[i, j, k].SetDensity(newDensity);
+						} else if (left && top && back) {
+							newDensity = (cells[i+1, j, k].density + cells[i, j-1, k].density + cells[i, j, k-1].density)/3f;
+							cells[i, j, k].SetDensity(newDensity);
+						} else if (right && bottom && front) {
+							newDensity = (cells[i-1, j, k].density + cells[i, j+1, k].density + cells[i, j, k+1].density)/3f;
+							cells[i, j, k].SetDensity(newDensity);
+						} else if (right && bottom && back) {
+							newDensity = (cells[i-1, j, k].density + cells[i, j+1, k].density + cells[i, j, k-1].density)/3f;
+							cells[i, j, k].SetDensity(newDensity);
+						} else if (right && top && front) {
+							newDensity = (cells[i-1, j, k].density + cells[i, j-1, k].density + cells[i, j, k+1].density)/3f;
+							cells[i, j, k].SetDensity(newDensity);
+						} else if (right && top && back) {
+							newDensity = (cells[i-1, j, k].density + cells[i, j-1, k].density + cells[i, j, k-1].density)/3f;
+							cells[i, j, k].SetDensity(newDensity);
+						} else if (left && bottom) {
+							newDensity = (cells[i+1, j, k].density + cells[i, j+1, k].density)/2f;
+							cells[i, j, k].SetDensity(newDensity);
+						} else if (left && top) {
+							newDensity = (cells[i+1, j, k].density + cells[i, j-1, k].density)/2f;
+							cells[i, j, k].SetDensity(newDensity);
+						} else if (left && front) {
+							newDensity = (cells[i+1, j, k].density + cells[i, j, k+1].density)/2f;
+							cells[i, j, k].SetDensity(newDensity);
+						} else if (left && back) {
+							newDensity = (cells[i+1, j, k].density + cells[i, j, k-1].density)/2f;
+							cells[i, j, k].SetDensity(newDensity);
+						} else if (right && bottom) {
+							newDensity = (cells[i-1, j, k].density + cells[i, j+1, k].density)/2f;
+							cells[i, j, k].SetDensity(newDensity);
+						} else if (right && top) {
+							newDensity = (cells[i-1, j, k].density + cells[i, j-1, k].density)/2f;
+							cells[i, j, k].SetDensity(newDensity);
+						} else if (right && front) {
+							newDensity = (cells[i-1, j, k].density + cells[i, j, k+1].density)/2f;
+							cells[i, j, k].SetDensity(newDensity);
+						} else if (right && back) {
+							newDensity = (cells[i-1, j, k].density + cells[i, j, k-1].density)/2f;
+							cells[i, j, k].SetDensity(newDensity);
+						} else if (bottom && front) {
+							newDensity = (cells[i, j+1, k].density + cells[i, j, k+1].density)/2f;
+							cells[i, j, k].SetDensity(newDensity);
+						} else if (bottom && back) {
+							newDensity = (cells[i, j+1, k].density + cells[i, j, k-1].density)/2f;
+							cells[i, j, k].SetDensity(newDensity);
+						} else if (top && front) {
+							newDensity = (cells[i, j-1, k].density + cells[i, j, k+1].density)/2f;
+							cells[i, j, k].SetDensity(newDensity);
+						} else if (top && back) {
+							newDensity = (cells[i, j-1, k].density + cells[i, j, k-1].density)/2f;
+							cells[i, j, k].SetDensity(newDensity);
+						} else if (left) {
+							cells[i, j, k].SetDensity(cells[i+1, j, k].density);
+						} else if (right) {
+							cells[i, j, k].SetDensity(cells[i-1, j, k].density);
+						} else if (bottom) {
+							cells[i, j, k].SetDensity(cells[i, j+1, k].density);
+						} else if (top) {
+							cells[i, j, k].SetDensity(cells[i, j-1, k].density);
+						} else if (front) {
+							cells[i, j, k].SetDensity(cells[i, j, k+1].density);
+						} else if (back) {
+							cells[i, j, k].SetDensity(cells[i, j, k-1].density);
+						}
+					}
+				}
+			}
+		}
+	}
+
+	public void SetVelocityBoundaries() {
+		for (int i = 0; i < RESOLUTION[0]; i += RESOLUTION[0]-1) {
+			for (int j = 0; j < RESOLUTION[1]; j += RESOLUTION[1]-1) {
+				for (int k = 0; k < RESOLUTION[2]; k += RESOLUTION[2]-1) {
 					bool left = (i == 0);
 					bool bottom = (j == 0);
 					bool front = (k == 0);
@@ -445,146 +749,192 @@ public class Grid : MonoBehaviour {
 					bool back = (k == RESOLUTION[2]-1);
 					if (left || right || bottom || front || top || back) {
 						Vector3 newVelocity;
-						float newDensity;
 
 						if (left && bottom && front) {
 							newVelocity = (cells[i+1, j, k].velocity + cells[i, j+1, k].velocity + cells[i, j, k+1].velocity)/3f;
 							cells[i, j, k].SetVelocity(newVelocity);
-							newDensity = (cells[i+1, j, k].density + cells[i, j+1, k].density + cells[i, j, k+1].density)/3f;
-							cells[i, j, k].SetDensity(newDensity);
 						} else if (left && bottom && back) {
 							newVelocity = (cells[i+1, j, k].velocity + cells[i, j+1, k].velocity + cells[i, j, k-1].velocity)/3f;
 							cells[i, j, k].SetVelocity(newVelocity);
-							newDensity = (cells[i+1, j, k].density + cells[i, j+1, k].density + cells[i, j, k-1].density)/3f;
-							cells[i, j, k].SetDensity(newDensity);
 						} else if (left && top && front) {
 							newVelocity = (cells[i+1, j, k].velocity + cells[i, j-1, k].velocity + cells[i, j, k+1].velocity)/3f;
 							cells[i, j, k].SetVelocity(newVelocity);
-							newDensity = (cells[i+1, j, k].density + cells[i, j-1, k].density + cells[i, j, k+1].density)/3f;
-							cells[i, j, k].SetDensity(newDensity);
 						} else if (left && top && back) {
 							newVelocity = (cells[i+1, j, k].velocity + cells[i, j-1, k].velocity + cells[i, j, k-1].velocity)/3f;
 							cells[i, j, k].SetVelocity(newVelocity);
-							newDensity = (cells[i+1, j, k].density + cells[i, j-1, k].density + cells[i, j, k-1].density)/3f;
-							cells[i, j, k].SetDensity(newDensity);
 						} else if (right && bottom && front) {
 							newVelocity = (cells[i-1, j, k].velocity + cells[i, j+1, k].velocity + cells[i, j, k+1].velocity)/3f;
 							cells[i, j, k].SetVelocity(newVelocity);
-							newDensity = (cells[i-1, j, k].density + cells[i, j+1, k].density + cells[i, j, k+1].density)/3f;
-							cells[i, j, k].SetDensity(newDensity);
 						} else if (right && bottom && back) {
 							newVelocity = (cells[i-1, j, k].velocity + cells[i, j+1, k].velocity + cells[i, j, k-1].velocity)/3f;
 							cells[i, j, k].SetVelocity(newVelocity);
-							newDensity = (cells[i-1, j, k].density + cells[i, j+1, k].density + cells[i, j, k-1].density)/3f;
-							cells[i, j, k].SetDensity(newDensity);
 						} else if (right && top && front) {
 							newVelocity = (cells[i-1, j, k].velocity + cells[i, j-1, k].velocity + cells[i, j, k+1].velocity)/3f;
 							cells[i, j, k].SetVelocity(newVelocity);
-							newDensity = (cells[i-1, j, k].density + cells[i, j-1, k].density + cells[i, j, k+1].density)/3f;
-							cells[i, j, k].SetDensity(newDensity);
 						} else if (right && top && back) {
 							newVelocity = (cells[i-1, j, k].velocity + cells[i, j-1, k].velocity + cells[i, j, k-1].velocity)/3f;
 							cells[i, j, k].SetVelocity(newVelocity);
-							newDensity = (cells[i-1, j, k].density + cells[i, j-1, k].density + cells[i, j, k-1].density)/3f;
-							cells[i, j, k].SetDensity(newDensity);
 						} else if (left && bottom) {
 							newVelocity = (cells[i+1, j, k].velocity + cells[i, j+1, k].velocity)/2f;
 							cells[i, j, k].SetVelocity(newVelocity);
-							newDensity = (cells[i+1, j, k].density + cells[i, j+1, k].density)/2f;
-							cells[i, j, k].SetDensity(newDensity);
 						} else if (left && top) {
 							newVelocity = (cells[i+1, j, k].velocity + cells[i, j-1, k].velocity)/2f;
 							cells[i, j, k].SetVelocity(newVelocity);
-							newDensity = (cells[i+1, j, k].density + cells[i, j-1, k].density)/2f;
-							cells[i, j, k].SetDensity(newDensity);
 						} else if (left && front) {
 							newVelocity = (cells[i+1, j, k].velocity + cells[i, j, k+1].velocity)/2f;
 							cells[i, j, k].SetVelocity(newVelocity);
-							newDensity = (cells[i+1, j, k].density + cells[i, j, k+1].density)/2f;
-							cells[i, j, k].SetDensity(newDensity);
 						} else if (left && back) {
 							newVelocity = (cells[i+1, j, k].velocity + cells[i, j, k-1].velocity)/2f;
 							cells[i, j, k].SetVelocity(newVelocity);
-							newDensity = (cells[i+1, j, k].density + cells[i, j, k-1].density)/2f;
-							cells[i, j, k].SetDensity(newDensity);
 						} else if (right && bottom) {
 							newVelocity = (cells[i-1, j, k].velocity + cells[i, j+1, k].velocity)/2f;
 							cells[i, j, k].SetVelocity(newVelocity);
-							newDensity = (cells[i-1, j, k].density + cells[i, j+1, k].density)/2f;
-							cells[i, j, k].SetDensity(newDensity);
 						} else if (right && top) {
 							newVelocity = (cells[i-1, j, k].velocity + cells[i, j-1, k].velocity)/2f;
 							cells[i, j, k].SetVelocity(newVelocity);
-							newDensity = (cells[i-1, j, k].density + cells[i, j-1, k].density)/2f;
-							cells[i, j, k].SetDensity(newDensity);
 						} else if (right && front) {
 							newVelocity = (cells[i-1, j, k].velocity + cells[i, j, k+1].velocity)/2f;
 							cells[i, j, k].SetVelocity(newVelocity);
-							newDensity = (cells[i-1, j, k].density + cells[i, j, k+1].density)/2f;
-							cells[i, j, k].SetDensity(newDensity);
 						} else if (right && back) {
 							newVelocity = (cells[i-1, j, k].velocity + cells[i, j, k-1].velocity)/2f;
 							cells[i, j, k].SetVelocity(newVelocity);
-							newDensity = (cells[i-1, j, k].density + cells[i, j, k-1].density)/2f;
-							cells[i, j, k].SetDensity(newDensity);
 						} else if (bottom && front) {
 							newVelocity = (cells[i, j+1, k].velocity + cells[i, j, k+1].velocity)/2f;
 							cells[i, j, k].SetVelocity(newVelocity);
-							newDensity = (cells[i, j+1, k].density + cells[i, j, k+1].density)/2f;
-							cells[i, j, k].SetDensity(newDensity);
 						} else if (bottom && back) {
 							newVelocity = (cells[i, j+1, k].velocity + cells[i, j, k-1].velocity)/2f;
 							cells[i, j, k].SetVelocity(newVelocity);
-							newDensity = (cells[i, j+1, k].density + cells[i, j, k-1].density)/2f;
-							cells[i, j, k].SetDensity(newDensity);
 						} else if (top && front) {
 							newVelocity = (cells[i, j-1, k].velocity + cells[i, j, k+1].velocity)/2f;
 							cells[i, j, k].SetVelocity(newVelocity);
-							newDensity = (cells[i, j-1, k].density + cells[i, j, k+1].density)/2f;
-							cells[i, j, k].SetDensity(newDensity);
 						} else if (top && back) {
 							newVelocity = (cells[i, j-1, k].velocity + cells[i, j, k-1].velocity)/2f;
 							cells[i, j, k].SetVelocity(newVelocity);
-							newDensity = (cells[i, j-1, k].density + cells[i, j, k-1].density)/2f;
-							cells[i, j, k].SetDensity(newDensity);
 						} else if (left) {
 							newVelocity.x = -1 *cells[i+1, j, k].velocity.x;
 							newVelocity.y = 	cells[i+1, j, k].velocity.y;
 							newVelocity.z = 	cells[i+1, j, k].velocity.z;
 							cells[i, j, k].SetVelocity(newVelocity);
-							cells[i, j, k].SetDensity(cells[i+1, j, k].density);
 						} else if (right) {
 							newVelocity.x = -1 *cells[i-1, j, k].velocity.x;
 							newVelocity.y = 	cells[i-1, j, k].velocity.y;
 							newVelocity.z = 	cells[i-1, j, k].velocity.z;
 							cells[i, j, k].SetVelocity(newVelocity);
-							cells[i, j, k].SetDensity(cells[i-1, j, k].density);
 						} else if (bottom) {
 							newVelocity.x = 	cells[i, j+1, k].velocity.x;
 							newVelocity.y = -1 *cells[i, j+1, k].velocity.y;
 							newVelocity.z = 	cells[i, j+1, k].velocity.z;
 							cells[i, j, k].SetVelocity(newVelocity);
-							cells[i, j, k].SetDensity(cells[i, j+1, k].density);
 						} else if (top) {
 							newVelocity.x = 	cells[i, j-1, k].velocity.x;
 							newVelocity.y = -1 *cells[i, j-1, k].velocity.y;
 							newVelocity.z = 	cells[i, j-1, k].velocity.z;
 							cells[i, j, k].SetVelocity(newVelocity);
-							cells[i, j, k].SetDensity(cells[i, j-1, k].density);
 						} else if (front) {
 							newVelocity.x = 	cells[i, j, k+1].velocity.x;
 							newVelocity.y = 	cells[i, j, k+1].velocity.y;
 							newVelocity.z = -1 *cells[i, j, k+1].velocity.z;
 							cells[i, j, k].SetVelocity(newVelocity);
-							cells[i, j, k].SetDensity(cells[i, j, k+1].density);
 						} else if (back) {
 							newVelocity.x = 	cells[i, j, k-1].velocity.x;
 							newVelocity.y =		cells[i, j, k-1].velocity.y;
 							newVelocity.z = -1 *cells[i, j, k-1].velocity.z;
 							cells[i, j, k].SetVelocity(newVelocity);
-							cells[i, j, k].SetDensity(cells[i, j, k-1].density);
 						}
 						Debug.DrawLine(cells[i, j, k].position, cells[i, j, k].position + cells[i, j, k].velocity, Color.blue);
+					}
+				}
+			}
+		}
+	}
+
+	public void SetPressureBoundaries() {
+		for (int i = 0; i < RESOLUTION[0]; i += RESOLUTION[0]-1) {
+			for (int j = 0; j < RESOLUTION[1]; j += RESOLUTION[1]-1) {
+				for (int k = 0; k < RESOLUTION[2]; k += RESOLUTION[2]-1) {
+					bool left = (i == 0);
+					bool bottom = (j == 0);
+					bool front = (k == 0);
+
+					bool right = (i == RESOLUTION[0]-1);
+					bool top = (j == RESOLUTION[1]-1);
+					bool back = (k == RESOLUTION[2]-1);
+					if (left || right || bottom || front || top || back) {
+						Vector3 newPressure;
+
+						if (left && bottom && front) {
+							newPressure = (cells[i+1, j, k].pressure + cells[i, j+1, k].pressure + cells[i, j, k+1].pressure)/3f;
+							cells[i, j, k].pressure = newPressure;
+						} else if (left && bottom && back) {
+							newPressure = (cells[i+1, j, k].pressure + cells[i, j+1, k].pressure + cells[i, j, k-1].pressure)/3f;
+							cells[i, j, k].pressure = newPressure;
+						} else if (left && top && front) {
+							newPressure = (cells[i+1, j, k].pressure + cells[i, j-1, k].pressure + cells[i, j, k+1].pressure)/3f;
+							cells[i, j, k].pressure = newPressure;
+						} else if (left && top && back) {
+							newPressure = (cells[i+1, j, k].pressure + cells[i, j-1, k].pressure + cells[i, j, k-1].pressure)/3f;
+							cells[i, j, k].pressure = newPressure;
+						} else if (right && bottom && front) {
+							newPressure = (cells[i-1, j, k].pressure + cells[i, j+1, k].pressure + cells[i, j, k+1].pressure)/3f;
+							cells[i, j, k].pressure = newPressure;
+						} else if (right && bottom && back) {
+							newPressure = (cells[i-1, j, k].pressure + cells[i, j+1, k].pressure + cells[i, j, k-1].pressure)/3f;
+							cells[i, j, k].pressure = newPressure;
+						} else if (right && top && front) {
+							newPressure = (cells[i-1, j, k].pressure + cells[i, j-1, k].pressure + cells[i, j, k+1].pressure)/3f;
+							cells[i, j, k].pressure = newPressure;
+						} else if (right && top && back) {
+							newPressure = (cells[i-1, j, k].pressure + cells[i, j-1, k].pressure + cells[i, j, k-1].pressure)/3f;
+							cells[i, j, k].pressure = newPressure;
+						} else if (left && bottom) {
+							newPressure = (cells[i+1, j, k].pressure + cells[i, j+1, k].pressure)/2f;
+							cells[i, j, k].pressure = newPressure;
+						} else if (left && top) {
+							newPressure = (cells[i+1, j, k].pressure + cells[i, j-1, k].pressure)/2f;
+							cells[i, j, k].pressure = newPressure;
+						} else if (left && front) {
+							newPressure = (cells[i+1, j, k].pressure + cells[i, j, k+1].pressure)/2f;
+							cells[i, j, k].pressure = newPressure;
+						} else if (left && back) {
+							newPressure = (cells[i+1, j, k].pressure + cells[i, j, k-1].pressure)/2f;
+							cells[i, j, k].pressure = newPressure;
+						} else if (right && bottom) {
+							newPressure = (cells[i-1, j, k].pressure + cells[i, j+1, k].pressure)/2f;
+							cells[i, j, k].pressure = newPressure;
+						} else if (right && top) {
+							newPressure = (cells[i-1, j, k].pressure + cells[i, j-1, k].pressure)/2f;
+							cells[i, j, k].pressure = newPressure;
+						} else if (right && front) {
+							newPressure = (cells[i-1, j, k].pressure + cells[i, j, k+1].pressure)/2f;
+							cells[i, j, k].pressure = newPressure;
+						} else if (right && back) {
+							newPressure = (cells[i-1, j, k].pressure + cells[i, j, k-1].pressure)/2f;
+							cells[i, j, k].pressure = newPressure;
+						} else if (bottom && front) {
+							newPressure = (cells[i, j+1, k].pressure + cells[i, j, k+1].pressure)/2f;
+							cells[i, j, k].pressure = newPressure;
+						} else if (bottom && back) {
+							newPressure = (cells[i, j+1, k].pressure + cells[i, j, k-1].pressure)/2f;
+							cells[i, j, k].pressure = newPressure;
+						} else if (top && front) {
+							newPressure = (cells[i, j-1, k].pressure + cells[i, j, k+1].pressure)/2f;
+							cells[i, j, k].pressure = newPressure;
+						} else if (top && back) {
+							newPressure = (cells[i, j-1, k].pressure + cells[i, j, k-1].pressure)/2f;
+							cells[i, j, k].pressure = newPressure;
+						} else if (left) {
+							cells[i, j, k].pressure = cells[i+1, j, k].pressure;
+						} else if (right) {
+							cells[i, j, k].pressure = cells[i-1, j, k].pressure;
+						} else if (bottom) {
+							cells[i, j, k].pressure = cells[i, j+1, k].pressure;
+						} else if (top) {
+							cells[i, j, k].pressure = cells[i, j-1, k].pressure;
+						} else if (front) {
+							cells[i, j, k].pressure = cells[i, j, k+1].pressure;
+						} else if (back) {
+							cells[i, j, k].pressure = cells[i, j, k-1].pressure;
+						}
 					}
 				}
 			}
