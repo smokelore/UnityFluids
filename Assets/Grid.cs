@@ -527,6 +527,26 @@ public class Grid : MonoBehaviour {
 							cells[i, j, k].SetVelocity(newVelocity);
 							newDensity = (cells[i-1, j, k].density + cells[i, j, k-1].density)/2f;
 							cells[i, j, k].SetDensity(newDensity);
+						} else if (bottom && front) {
+							newVelocity = (cells[i, j+1, k].velocity + cells[i, j, k+1].velocity)/2f;
+							cells[i, j, k].SetVelocity(newVelocity);
+							newDensity = (cells[i, j+1, k].density + cells[i, j, k+1].density)/2f;
+							cells[i, j, k].SetDensity(newDensity);
+						} else if (bottom && back) {
+							newVelocity = (cells[i, j+1, k].velocity + cells[i, j, k-1].velocity)/2f;
+							cells[i, j, k].SetVelocity(newVelocity);
+							newDensity = (cells[i, j+1, k].density + cells[i, j, k-1].density)/2f;
+							cells[i, j, k].SetDensity(newDensity);
+						} else if (top && front) {
+							newVelocity = (cells[i, j-1, k].velocity + cells[i, j, k+1].velocity)/2f;
+							cells[i, j, k].SetVelocity(newVelocity);
+							newDensity = (cells[i, j-1, k].density + cells[i, j, k+1].density)/2f;
+							cells[i, j, k].SetDensity(newDensity);
+						} else if (top && back) {
+							newVelocity = (cells[i, j-1, k].velocity + cells[i, j, k-1].velocity)/2f;
+							cells[i, j, k].SetVelocity(newVelocity);
+							newDensity = (cells[i, j-1, k].density + cells[i, j, k-1].density)/2f;
+							cells[i, j, k].SetDensity(newDensity);
 						} else if (left) {
 							newVelocity.x = -1 *cells[i+1, j, k].velocity.x;
 							newVelocity.y = 	cells[i+1, j, k].velocity.y;
