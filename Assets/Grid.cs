@@ -16,9 +16,13 @@ public class Cell {
 
 	public void SetVelocity(Vector3 new_velocity) {
 		this.prev_velocity = this.velocity;
-		new_velocity = new Vector3(allowVelocity.x * new_velocity.x, allowVelocity.y * new_velocity.y, allowVelocity.z * new_velocity.z);	// only  allow changes to allowed velocities (because boundaries)
-		this.velocity = new_velocity.normalized;
+		new_velocity = Vector3.ClampMagnitude(new_velocity, 1f);
+		this.velocity = new Vector3(allowVelocity.x * new_velocity.x, allowVelocity.y * new_velocity.y, allowVelocity.z * new_velocity.z);	// only  allow changes to allowed velocities (because boundaries)
 		Debug.DrawLine(position, position + velocity, Color.red);
+	}
+
+	public void ChangeVelocity(Vector3 delta) {
+		SetVelocity(this.velocity + delta);
 	}
 
 	public void SetBoundary(Vector3 allowVelocity) {
@@ -63,14 +67,32 @@ public class Cell {
 
 public class Source {
 	public int[] index = new int[3];
+	public Vector3 forceDirection;
 	public float amount;
 
 	private float initAmount;
 	private float initTime;
-	private float duration = 2f;
+	private float duration = 4f;
 
 	public Source(int[] index, float amount) {
+		Initialize(index, Vector3.zero, amount);
+	}
+
+	public Source(int[] index, Vector3 forceDirection, float amount) {
+		Initialize(index, forceDirection, amount);
+	}
+
+	public Source(int i, int j, int k, float amount) {
+		Initialize(new int[3] {i, j, k}, Vector3.zero, amount);
+	}
+
+	public Source(int i, int j, int k, Vector3 forceDirection, float amount) {
+		Initialize(new int[3] {i, j, k}, forceDirection, amount);
+	}
+
+	private void Initialize(int[] index, Vector3 forceDirection, float amount) {
 		this.index = index;
+		this.forceDirection = Vector3.ClampMagnitude(forceDirection, 1f);
 		this.initAmount = amount;
 		this.initTime = Time.time;
 	}
@@ -103,7 +125,7 @@ public class Grid : MonoBehaviour {
 	public List<Source> sources = new List<Source>();
 	private ParticleSystem.Particle[] particles;
 
-	public GameObject UserBlock;
+	public GameObject UserObject;
 
 	public int relaxationIterations;
 
@@ -155,7 +177,7 @@ public class Grid : MonoBehaviour {
 
 					cells[i, j, k].SetBoundary(allowVelocity);
 					cells[i, j, k].SetVelocity(new Vector3(0, 0, 0));
-					cells[i, j, k].SetVelocity(new Vector3(Random.Range(-1f, 1f), Random.Range(-1f, 1f), Random.Range(-1f, 1f))/10f);
+					//cells[i, j, k].SetVelocity(new Vector3(Random.Range(-1f, 1f), Random.Range(-1f, 1f), Random.Range(-1f, 1f))/10f);
 
 					if (!cells[i, j, k].isBoundary) {
 						ParticleSystem.Particle p = new ParticleSystem.Particle();
@@ -187,13 +209,15 @@ public class Grid : MonoBehaviour {
 	}
 
 	public void DetectInput() {
-		int i = Mathf.RoundToInt((UserBlock.transform.position.x - ORIGIN.x) / (PARTICLE_SIZE));
-		int j = Mathf.RoundToInt((UserBlock.transform.position.y - ORIGIN.y) / (PARTICLE_SIZE));
-		int k = Mathf.RoundToInt((UserBlock.transform.position.z - ORIGIN.z) / (PARTICLE_SIZE));
+		int i = Mathf.RoundToInt((UserObject.transform.position.x - ORIGIN.x) / (PARTICLE_SIZE));
+		int j = Mathf.RoundToInt((UserObject.transform.position.y - ORIGIN.y) / (PARTICLE_SIZE));
+		int k = Mathf.RoundToInt((UserObject.transform.position.z - ORIGIN.z) / (PARTICLE_SIZE));
 		//Debug.Log("" + i + " " + j + " " + k);
 		if (i > 0 && i < RESOLUTION[0]-1 && j > 0 && j < RESOLUTION[1]-1 && k > 0 && k < RESOLUTION[2]-1) {
-			sources.Add(new Source(new int[] {i, j, k}, 100f));
+			Vector3 userVelocity = UserObject.GetComponent<CharacterController>().velocity;
+			sources.Add(new Source(new int[] {i, j, k}, userVelocity, 1f * userVelocity.magnitude / dt));
 			//Debug.Log("within cell " + i + " " + j + " " + k);
+			//Debug.Log(userVelocity);
 		}
 	}
 
@@ -203,6 +227,7 @@ public class Grid : MonoBehaviour {
 			int j = s.index[1];
 			int k = s.index[2];
 			cells[i, j, k].ChangeDensity(s.amount * dt);
+			cells[i, j, k].ChangeVelocity(s.amount * s.direction);
 			UpdateParticle(i, j, k);	
 		}
 
@@ -294,6 +319,16 @@ public class Grid : MonoBehaviour {
 					cells[i, j, k].SetVelocity(newVelocity);
 
 					UpdateParticle(i, j, k);
+				}
+			}
+		}
+	}
+
+	public void Project() {
+		for (int i = 1; i < RESOLUTION[0]-1; i++) {
+			for (int j = 1; j < RESOLUTION[1]-1; j++) {
+				for (int k = 1; k < RESOLUTION[2]-1; k++) {
+
 				}
 			}
 		}
